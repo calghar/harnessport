@@ -1,0 +1,73 @@
+{
+  "name": "harnessport",
+  "version": "0.1.2",
+  "description": "Convert AI coding harness configs (rules, agents, skills, commands, MCP, hooks, permissions) between Claude Code, OpenCode, Cursor, Windsurf, Copilot, and Codex CLI",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "harnessport": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint src/ tests/",
+    "lint:fix": "biome lint --write --unsafe src/ tests/",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "prepublishOnly": "npm run check && npm run build",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "biome lint --write --unsafe",
+      "bash -c 'tsc --noEmit'"
+    ]
+  },
+  "keywords": [
+    "claude-code",
+    "opencode",
+    "cursor",
+    "windsurf",
+    "copilot",
+    "codex",
+    "ai-agents",
+    "config-converter",
+    "mcp",
+    "rules",
+    "harness"
+  ],
+  "author": "calghar",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/calghar/harnessport.git"
+  },
+  "homepage": "https://github.com/calghar/harnessport#readme",
+  "bugs": {
+    "url": "https://github.com/calghar/harnessport/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "gray-matter": "^4.0.3",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.13",
+    "@types/node": "^25.6.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}

@@ -1,0 +1,15 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.4.13/schema.json",
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"suspicious": {
+				"noTemplateCurlyInString": "off"
+			}
+		}
+	},
+	"files": {
+		"includes": ["**/src/**/*.ts", "**/tests/**/*.ts"]
+	}
+}

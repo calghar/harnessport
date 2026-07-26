@@ -1,0 +1,127 @@
+schema: brownfield
+
+# Brownfield selected on threat model, not size. The repo is one squashed commit, but it is
+# published on npm (harnessport@0.1.2, `npx harnessport`), exposes a CLI contract that scripts
+# call, and its entire product is an on-disk output format written into other people's
+# repositories. A change here can regress a consumer's config files. Regression, not
+# over-build, is the governing risk.
+
+context: |
+  ## Purpose
+
+  harnessport is a CLI that converts AI coding harness configuration between tools. It imports
+  a source tool's config files into a canonical intermediate schema, then exports that schema
+  into a target tool's file layout. Eight feature types cross the boundary: rules, agents,
+  skills, commands, MCP servers, permissions, hooks, and formatters.
+
+  Six harnesses are supported: Claude Code, OpenCode, Cursor, Windsurf, GitHub Copilot, and
+  Codex CLI. Conversions that cannot be represented losslessly emit warnings.
+
+  ## Status
+
+  Published as harnessport@0.1.2. Working, with known fidelity defects recorded in the audit:
+  permission `deny` rules are not representable in the canonical schema and convert into
+  `allow`; the Windsurf and Codex exporters warn that agents were merged into rules while never
+  writing them; existing target files are overwritten without backup; output-name collisions
+  silently drop entries. Treat the current emitted output as behaviour under repair, not as a
+  contract to preserve verbatim.
+
+  ## Stack
+
+  - TypeScript 6.0 (`strict: true`), target ES2022, module NodeNext
+  - Node >= 18 (`engines`), ESM only (`"type": "module"`)
+  - commander 14 (CLI), yaml 2.8 (frontmatter), zod 4.3 (schema types)
+  - Biome 2.4 (lint), vitest 4.1 (test), husky + lint-staged (pre-commit)
+
+  ## Layout
+
+  ```
+  src/
+    index.ts              CLI entry — commander wiring for convert / detect / list
+    schema.ts             canonical intermediate schema + inferred types
+    utils.ts              frontmatter, file IO, shared import/export helpers
+    converters/
+      types.ts            Converter interface: detect / import / export
+      {claude,opencode,cursor,windsurf,copilot,codex}.ts
+  tests/
+    fixtures/sample-project/   shared Claude-shaped fixture used by every test
+  ```
+
+  ## Invariants
+
+  - Every converter implements `Converter` (`src/converters/types.ts`): `detect(rootDir)`,
+    `import(rootDir) -> HarnessConfig`, `export(rootDir, config, dryRun) -> ExportResult`.
+    Adding a harness means adding one file under `src/converters/` and registering it in the
+    `converters` record in `src/index.ts`.
+  - Relative imports carry an explicit `.js` extension — NodeNext resolution, ESM output.
+    `from "../schema.js"`, never `from "../schema"`.
+  - `dryRun` must reach every write. All writes go through `writeIfNotDry` in `src/utils.ts`;
+    no converter calls `fs.writeFileSync` directly.
+  - Losing information across a conversion is reported, never silent. A feature the target
+    cannot represent produces a warning naming what was dropped and why.
+  - A warning must be true. Text claiming content was merged or preserved requires code that
+    actually writes it.
+  - Converting must never weaken a security posture. A permission `deny` is never emitted as
+    an `allow`.
+  - Imports are total: a missing file yields an empty result, never a throw. Malformed input is
+    distinguishable from absent input.
+
+  ## Commands
+
+  - `npm run check` — the gate: `typecheck && lint && test`
+  - `npm run build` — `tsc` to `dist/`
+  - `npm run dev` — run the CLI from source via tsx
+  - `npm run typecheck` / `npm run lint` / `npm run test` individually
+  - `npm run lint:fix` — Biome with `--write --unsafe`
+
+  No dev server, no ports, no external services. Tests are pure filesystem work against
+  `tests/fixtures/`.
+
+rules:
+  proposal:
+    - Name every converter file the change touches. A change to `src/schema.ts` or
+      `src/utils.ts` affects all six converters by construction — say so and list them rather
+      than writing "various".
+    - State the effect on emitted files explicitly. The on-disk output is the product's
+      contract with a user's repository; a change to frontmatter shape, file naming, or
+      directory layout is BREAKING even when no TypeScript signature changes.
+    - State the effect on CLI surface — flags, exit codes, stdout format. Scripts consume these.
+    - A change touching permissions carries a sentence on whether it can weaken a security
+      posture, and how that is prevented.
+
+  specs:
+    - Scenarios name a concrete source harness and target harness, not "a tool". Write
+      "WHEN converting from opencode to claude", never "WHEN converting between harnesses".
+    - >-
+      Fidelity requirements state the observable artifact: the exact emitted path and the
+      frontmatter key affected. "Rules are preserved" is untestable; ".cursor/rules/x.mdc with
+      globs: src/**/*.ts becomes .claude/rules/x.md with paths: [src/**/*.ts]" is testable.
+    - Every requirement that changes emitted output carries a preserved-behaviour scenario for
+      the shapes that must not change, so the regression guard exists before the edit.
+    - Permission requirements state the action (allow / ask / deny) in both source and target
+      terms. A requirement that omits the action is incomplete.
+
+  design:
+    - Lead the risk section with the six converters. State, per converter, whether the change
+      alters its emitted output, and if not, why not.
+    - Any change to `HarnessConfig` (`src/schema.ts`) lists the import site and the export site
+      in each converter that reads or writes the changed field.
+    - Migration plan covers users holding files written by an earlier version. State whether
+      old output still parses, and whether re-running the converter is required.
+    - >-
+      Name the rollback: which npm version a consumer pins to, and whether emitted files from
+      the new version remain readable by the old one.
+
+  tasks:
+    - Task 1.1 is the BDD barrier, before any code task.
+    - Land `src/schema.ts` and `src/converters/types.ts` changes before the converters that
+      consume them; land `src/utils.ts` helpers before their callers. Interface first, callers
+      after, one reviewable unit each.
+    - >-
+      Every task touching a converter's export path carries a task asserting on real files
+      written to a temp directory, not a `dryRun: true` file-path list. Dry-run assertions do
+      not execute the serialization path.
+    - A task changing shared code in `src/utils.ts` names the converters that call it and
+      carries a regression task per caller.
+    - Close with `npm run check`, and with a real CLI run against `tests/fixtures/` whose
+      emitted files are read back.

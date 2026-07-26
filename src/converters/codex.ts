@@ -1,19 +1,26 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Converter, ExportResult } from "./types.js";
+import type { Converter, ExportOptions, ExportResult } from "./types.js";
+import { NO_PERMISSIONS } from "./types.js";
 import type {
   HarnessConfig,
   Rule,
+  FidelityItem,
   Hook,
 } from "../schema.js";
+import type { WriteContext } from "../utils.js";
 import {
   readFileIfExists,
   readJsonIfExists,
   importSkillsFromDir,
   exportSkillsToDir,
   exportRulesToFile,
-  generateDropWarnings,
+  generateDropItems,
+  exactItems,
+  permissionStatus,
   writeIfNotDry,
+  takeReadProblems,
+  newWriteContext,
 } from "../utils.js";
 
 // --- Import ---
@@ -58,7 +65,7 @@ function parseCodexHooksObject(obj: Record<string, unknown>): Hook[] {
 function exportHooks(
   rootDir: string,
   hooks: Hook[],
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   if (hooks.length === 0) return [];
 
@@ -76,7 +83,7 @@ function exportHooks(
   }, {});
 
   const filePath = path.join(rootDir, ".codex", "hooks.json");
-  writeIfNotDry(filePath, `${JSON.stringify({ hooks: grouped }, null, 2)}\n`, dryRun);
+  if (!writeIfNotDry(filePath, `${JSON.stringify({ hooks: grouped }, null, 2)}\n`, ctx)) return [];
   return [filePath];
 }
 
@@ -84,16 +91,28 @@ function exportHooks(
 
 export const codexConverter: Converter = {
   name: "codex",
+  label: "Codex CLI",
+  // Agents and MCP servers live in ~/.codex/config.toml, which is user-level and not read.
+  // Permissions are `none`, not user-level: Codex has approval_policy and sandbox_mode, which are
+  // a sandbox mode rather than a tool-and-pattern list, so a PermissionEntry has nothing to map
+  // onto — the feature is absent, not merely out of reach.
+  capabilities: {
+    rule: "full",
+    agent: "user-level",
+    skill: "full",
+    command: "none",
+    mcp: "user-level",
+    permission: "none",
+    hook: "full",
+    formatter: "none",
+  },
+  permissionActions: NO_PERMISSIONS,
 
   detect(rootDir: string): boolean {
     return fs.existsSync(path.join(rootDir, ".codex"));
   },
 
   import(rootDir: string): HarnessConfig {
-    const warnings: string[] = [];
-    warnings.push(
-      "Codex CLI MCP servers and agents are configured in ~/.codex/config.toml (user-level TOML), not project-level files. These were not imported.",
-    );
     return {
       rules: importRules(rootDir),
       agents: [],
@@ -103,41 +122,78 @@ export const codexConverter: Converter = {
       permissions: [],
       hooks: importHooks(rootDir),
       formatters: [],
-      warnings,
+      items: [
+        ...takeReadProblems(),
+        {
+          phase: "import",
+          kind: "mcp",
+          name: "(all)",
+          status: "dropped",
+          reason:
+            "Codex CLI MCP servers live in ~/.codex/config.toml (user-level TOML), which is not read",
+        },
+        {
+          phase: "import",
+          kind: "agent",
+          name: "(all)",
+          status: "dropped",
+          reason:
+            "Codex CLI agents live in ~/.codex/config.toml (user-level TOML), which is not read",
+        },
+      ],
     };
   },
 
   export(
     rootDir: string,
     config: HarnessConfig,
-    dryRun = false,
+    options: ExportOptions = {},
   ): ExportResult {
-    const warnings: string[] = [...config.warnings];
+    const ctx = newWriteContext(options);
+    const items: FidelityItem[] = [...config.items];
     const filesWritten: string[] = [
       ...exportRulesToFile(
         path.join(rootDir, "AGENTS.md"),
         config.rules,
-        dryRun,
+        ctx,
       ),
       ...exportSkillsToDir(
         path.join(rootDir, ".codex", "skills"),
         config.skills,
-        dryRun,
+        ctx,
       ),
-      ...exportHooks(rootDir, config.hooks, dryRun),
+      ...exportHooks(rootDir, config.hooks, ctx),
     ];
 
-    warnings.push(...generateDropWarnings(config, {
-      agents: "partially converted. Codex CLI agents are configured in ~/.codex/config.toml [agents.<name>], not project files. Agent body content was merged into AGENTS.md.",
-      commands: "dropped. Codex CLI has built-in slash commands, not user-defined ones.",
-      mcpServers: "not written. Codex CLI MCP is configured in ~/.codex/config.toml [mcp_servers.<name>] (TOML format, user-level).",
-      permissions: "Permissions partially map to Codex CLI approval_policy in config.toml. Not written (user-level config).",
-    }));
+    items.push(
+      ...generateDropItems(config, {
+        // This exporter writes config.rules only. Claiming agent bodies were "merged into
+        // AGENTS.md" was false; they are reported dropped.
+        agents:
+          "Codex CLI agents are configured in ~/.codex/config.toml [agents.<name>], and this exporter does not write agent bodies into AGENTS.md",
+        commands: "Codex CLI has built-in slash commands, not user-defined ones",
+        mcpServers:
+          "Codex CLI MCP is configured in ~/.codex/config.toml [mcp_servers.<name>] (user-level TOML)",
+      }),
+      ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
+      ...exactItems("skill", config.skills.map((s) => s.name)),
+      ...exactItems("hook", config.hooks.map((h) => h.event)),
+      ...config.permissions.map((p) =>
+        permissionStatus(p, codexConverter.permissionActions, "Codex CLI"),
+      ),
+    );
 
-    if (config.formatters.length > 0) {
-      warnings.push("Formatters dropped. Codex CLI has no formatter equivalent.");
+    for (const fmt of config.formatters) {
+      items.push({
+        phase: "export",
+        kind: "formatter",
+        name: fmt.glob,
+        status: "dropped",
+        reason: "Codex CLI has no formatter equivalent",
+      });
     }
 
-    return { filesWritten, warnings };
+    items.push(...ctx.items);
+    return { filesWritten, items };
   },
 };

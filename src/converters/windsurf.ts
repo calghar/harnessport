@@ -1,11 +1,14 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Converter, ExportResult } from "./types.js";
+import type { Converter, ExportOptions, ExportResult } from "./types.js";
+import { NO_PERMISSIONS } from "./types.js";
 import type {
   HarnessConfig,
   Rule,
   Command,
+  FidelityItem,
 } from "../schema.js";
+import type { WriteContext } from "../utils.js";
 import {
   parseFrontmatter,
   serializeFrontmatter,
@@ -14,8 +17,12 @@ import {
   getGlobs,
   importSkillsFromDir,
   exportSkillsToDir,
-  generateDropWarnings,
+  generateDropItems,
+  exactItems,
+  permissionStatus,
   writeIfNotDry,
+  takeReadProblems,
+  newWriteContext,
   slugify,
   listMdFiles,
 } from "../utils.js";
@@ -70,7 +77,7 @@ function importWorkflows(rootDir: string): Command[] {
 function exportRules(
   rootDir: string,
   config: HarnessConfig,
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const files: string[] = [];
   const rulesDir = path.join(rootDir, ".windsurf", "rules");
@@ -89,8 +96,7 @@ function exportRules(
     };
 
     const content = serializeFrontmatter(frontmatter, rule.content);
-    writeIfNotDry(filePath, content, dryRun);
-    files.push(filePath);
+    if (writeIfNotDry(filePath, content, ctx)) files.push(filePath);
   }
 
   return files;
@@ -106,7 +112,7 @@ function deriveTrigger(rule: Rule): string {
 function exportWorkflows(
   rootDir: string,
   commands: Command[],
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const files: string[] = [];
   const workflowsDir = path.join(rootDir, ".windsurf", "workflows");
@@ -118,8 +124,7 @@ function exportWorkflows(
       description: cmd.description,
     };
     const content = serializeFrontmatter(frontmatter, cmd.body);
-    writeIfNotDry(filePath, content, dryRun);
-    files.push(filePath);
+    if (writeIfNotDry(filePath, content, ctx)) files.push(filePath);
   }
 
   return files;
@@ -129,6 +134,20 @@ function exportWorkflows(
 
 export const windsurfConverter: Converter = {
   name: "windsurf",
+  label: "Windsurf",
+  // Windsurf does have MCP servers, but only in ~/.codeium/windsurf/mcp_config.json, outside any
+  // repository. It has no agent concept at all — hence none rather than user-level.
+  capabilities: {
+    rule: "full",
+    agent: "none",
+    skill: "full",
+    command: "full",
+    mcp: "user-level",
+    permission: "none",
+    hook: "none",
+    formatter: "none",
+  },
+  permissionActions: NO_PERMISSIONS,
 
   detect(rootDir: string): boolean {
     return (
@@ -139,7 +158,6 @@ export const windsurfConverter: Converter = {
   },
 
   import(rootDir: string): HarnessConfig {
-    const warnings: string[] = [];
     return {
       rules: importRules(rootDir),
       agents: [],
@@ -149,33 +167,46 @@ export const windsurfConverter: Converter = {
       permissions: [],
       hooks: [],
       formatters: [],
-      warnings,
+      items: takeReadProblems(),
     };
   },
 
   export(
     rootDir: string,
     config: HarnessConfig,
-    dryRun = false,
+    options: ExportOptions = {},
   ): ExportResult {
-    const warnings: string[] = [...config.warnings];
+    const ctx = newWriteContext(options);
+    const items: FidelityItem[] = [...config.items];
     const filesWritten: string[] = [
-      ...exportRules(rootDir, config, dryRun),
+      ...exportRules(rootDir, config, ctx),
       ...exportSkillsToDir(
         path.join(rootDir, ".windsurf", "skills"),
         config.skills,
-        dryRun,
+        ctx,
       ),
-      ...exportWorkflows(rootDir, config.commands, dryRun),
+      ...exportWorkflows(rootDir, config.commands, ctx),
     ];
 
-    warnings.push(...generateDropWarnings(config, {
-      agents: "partially converted. Agent instructions were merged into rules. Windsurf supports AGENTS.md but not per-agent tool/model config.",
-      mcpServers: "not written. Windsurf MCP config is user-level (~/.codeium/windsurf/mcp_config.json), not project-level.",
-      permissions: "Permissions dropped. Windsurf has no project-level permission config.",
-      hooksFormatters: "Hooks/formatters dropped. Windsurf has no hooks or formatter config.",
-    }));
+    items.push(
+      ...generateDropItems(config, {
+        // Agents are not written anywhere by this exporter. Saying they were "merged into
+        // rules" was false; they are reported dropped.
+        agents:
+          "Windsurf has no agent config, and this exporter does not write agent bodies into rules",
+        mcpServers:
+          "Windsurf MCP config is user-level (~/.codeium/windsurf/mcp_config.json), not project-level",
+        hooksFormatters: "Windsurf has no hooks or formatter config",
+      }),
+      ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
+      ...exactItems("skill", config.skills.map((s) => s.name)),
+      ...exactItems("command", config.commands.map((c) => c.name)),
+      ...config.permissions.map((p) =>
+        permissionStatus(p, windsurfConverter.permissionActions, "Windsurf"),
+      ),
+    );
 
-    return { filesWritten, warnings };
+    items.push(...ctx.items);
+    return { filesWritten, items };
   },
 };

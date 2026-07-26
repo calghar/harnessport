@@ -1,12 +1,15 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Converter, ExportResult } from "./types.js";
+import type { Converter, ExportOptions, ExportResult } from "./types.js";
+import { NO_PERMISSIONS } from "./types.js";
 import type {
   HarnessConfig,
   Rule,
   Agent,
   Command,
+  FidelityItem,
 } from "../schema.js";
+import type { WriteContext } from "../utils.js";
 import {
   parseFrontmatter,
   serializeFrontmatter,
@@ -20,8 +23,12 @@ import {
   importSkillsFromDir,
   exportMcpToJson,
   exportSkillsToDir,
-  generateDropWarnings,
+  generateDropItems,
+  exactItems,
+  permissionStatus,
   writeIfNotDry,
+  takeReadProblems,
+  newWriteContext,
   slugify,
 } from "../utils.js";
 
@@ -94,7 +101,7 @@ function importAgents(rootDir: string): Agent[] {
 function exportRules(
   rootDir: string,
   config: HarnessConfig,
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const files: string[] = [];
   const rulesDir = path.join(rootDir, ".cursor", "rules");
@@ -112,8 +119,7 @@ function exportRules(
     };
 
     const content = serializeFrontmatter(frontmatter, rule.content);
-    writeIfNotDry(filePath, content, dryRun);
-    files.push(filePath);
+    if (writeIfNotDry(filePath, content, ctx)) files.push(filePath);
   }
 
   return files;
@@ -122,25 +128,24 @@ function exportRules(
 function exportCommands(
   rootDir: string,
   commands: Command[],
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const commandsDir = path.join(rootDir, ".cursor", "commands");
-  return commands.map((cmd) => {
+  return commands.flatMap((cmd) => {
     const fileName = `${slugify(cmd.name)}.md`;
     const filePath = path.join(commandsDir, fileName);
     // Cursor commands are plain markdown — no frontmatter
-    writeIfNotDry(filePath, cmd.body, dryRun);
-    return filePath;
+    return writeIfNotDry(filePath, cmd.body, ctx) ? [filePath] : [];
   });
 }
 
 function exportAgents(
   rootDir: string,
   agents: Agent[],
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const agentsDir = path.join(rootDir, ".cursor", "agents");
-  return agents.map((agent) => {
+  return agents.flatMap((agent) => {
     const fileName = `${slugify(agent.name)}.md`;
     const filePath = path.join(agentsDir, fileName);
     const frontmatter: Record<string, unknown> = {
@@ -149,8 +154,7 @@ function exportAgents(
       description: agent.description,
     };
     const content = serializeFrontmatter(frontmatter, agent.body);
-    writeIfNotDry(filePath, content, dryRun);
-    return filePath;
+    return writeIfNotDry(filePath, content, ctx) ? [filePath] : [];
   });
 }
 
@@ -158,6 +162,18 @@ function exportAgents(
 
 export const cursorConverter: Converter = {
   name: "cursor",
+  label: "Cursor",
+  capabilities: {
+    rule: "full",
+    agent: "full",
+    skill: "full",
+    command: "full",
+    mcp: "full",
+    permission: "none",
+    hook: "none",
+    formatter: "none",
+  },
+  permissionActions: NO_PERMISSIONS,
 
   detect(rootDir: string): boolean {
     const cursorDir = path.join(rootDir, ".cursor");
@@ -182,30 +198,41 @@ export const cursorConverter: Converter = {
       permissions: [],
       hooks: [],
       formatters: [],
-      warnings: [],
+      items: takeReadProblems(),
     };
   },
 
   export(
     rootDir: string,
     config: HarnessConfig,
-    dryRun = false,
+    options: ExportOptions = {},
   ): ExportResult {
+    const ctx = newWriteContext(options);
     const cursorDir = path.join(rootDir, ".cursor");
-    const warnings: string[] = [...config.warnings];
+    const items: FidelityItem[] = [...config.items];
     const filesWritten: string[] = [
-      ...exportRules(rootDir, config, dryRun),
-      ...exportCommands(rootDir, config.commands, dryRun),
-      ...exportAgents(rootDir, config.agents, dryRun),
-      ...exportSkillsToDir(path.join(cursorDir, "skills"), config.skills, dryRun),
-      ...exportMcpToJson(path.join(cursorDir, "mcp.json"), config.mcpServers, dryRun),
+      ...exportRules(rootDir, config, ctx),
+      ...exportCommands(rootDir, config.commands, ctx),
+      ...exportAgents(rootDir, config.agents, ctx),
+      ...exportSkillsToDir(path.join(cursorDir, "skills"), config.skills, ctx),
+      ...exportMcpToJson(path.join(cursorDir, "mcp.json"), config.mcpServers, ctx),
     ];
 
-    warnings.push(...generateDropWarnings(config, {
-      permissions: "Permissions dropped. Cursor has no project-level permission config.",
-      hooksFormatters: "Hooks/formatters dropped. Cursor has no hooks or formatter config.",
-    }));
+    items.push(
+      ...generateDropItems(config, {
+        hooksFormatters: "Cursor has no hooks or formatter config",
+      }),
+      ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
+      ...exactItems("agent", config.agents.map((a) => a.name)),
+      ...exactItems("skill", config.skills.map((s) => s.name)),
+      ...exactItems("command", config.commands.map((c) => c.name)),
+      ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
+      ...config.permissions.map((p) =>
+        permissionStatus(p, cursorConverter.permissionActions, "Cursor"),
+      ),
+    );
 
-    return { filesWritten, warnings };
+    items.push(...ctx.items);
+    return { filesWritten, items };
   },
 };

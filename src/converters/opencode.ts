@@ -1,14 +1,18 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Converter, ExportResult } from "./types.js";
+import type { Converter, ExportOptions, ExportResult } from "./types.js";
+import { ALL_ACTIONS } from "./types.js";
 import type {
   HarnessConfig,
   Agent,
   Command,
+  FidelityItem,
   McpServer,
+  PermissionAction,
   PermissionEntry,
   Formatter,
 } from "../schema.js";
+import type { WriteContext } from "../utils.js";
 import {
   parseFrontmatter,
   serializeFrontmatter,
@@ -24,9 +28,14 @@ import {
   exportSkillsToDir,
   exportRulesToFile,
   writeIfNotDry,
+  uniqueSlugs,
+  takeReadProblems,
+  newWriteContext,
   slugify,
   envVarsToOpenCode,
   envVarsFromOpenCode,
+  exactItems,
+  permissionStatus,
 } from "../utils.js";
 
 // --- Shared constants ---
@@ -40,6 +49,36 @@ const GRANULAR_PERMISSIONS = new Set([
   "read", "edit", "glob", "grep", "list", "bash", "task",
   "external_directory", "lsp", "skill",
 ]);
+
+/**
+ * OpenCode permission keys, mapped to the canonical tool names the schema uses.
+ *
+ * `PermissionEntry.tool` is canonically the capitalised name Claude Code matches. Importing
+ * OpenCode's lowercase keys verbatim wrote `bash(git push *)` into `.claude/settings.local.json`,
+ * where Claude Code matches `Bash` — so an "ask" rule never fired and the command ran unprompted.
+ * A key with no canonical equivalent keeps its own name rather than being guessed at.
+ */
+const CANONICAL_TOOLS: Record<string, string> = {
+  bash: "Bash",
+  read: "Read",
+  edit: "Edit",
+  write: "Write",
+  glob: "Glob",
+  grep: "Grep",
+  task: "Task",
+  webfetch: "WebFetch",
+  websearch: "WebSearch",
+};
+
+function canonicalTool(key: string): string {
+  return CANONICAL_TOOLS[key.toLowerCase()] ?? key;
+}
+
+/**
+ * Tools OpenCode has no permission key for. `buildPermissionConfig` drops these, so reporting
+ * them `exact` claimed a conversion that never happened.
+ */
+const UNREPRESENTABLE_TOOLS = new Set(["websearch"]);
 
 // --- Import ---
 
@@ -98,14 +137,28 @@ function isOpenCodeConfigJson(v: unknown): v is OpenCodeConfigJson {
   return typeof v === "object" && v !== null;
 }
 
+function toAction(value: string): PermissionEntry["action"] {
+  return value === "deny" || value === "ask" ? value : "allow";
+}
+
+/**
+ * OpenCode expresses a permission as either a shorthand action ("bash": "deny") or a
+ * per-pattern map ("bash": { "rm *": "deny" }). Both carry the action; reading only the
+ * keys discarded it and every rule became an allow downstream.
+ */
 function parsePermissions(
   permConfig: Record<string, Record<string, string> | string>,
 ): PermissionEntry[] {
-  return Object.entries(permConfig).flatMap(([tool, rules]) => {
+  return Object.entries(permConfig).flatMap(([key, rules]) => {
+    const tool = canonicalTool(key);
     if (typeof rules === "string") {
-      return [{ tool, pattern: "*" }];
+      return [{ tool, pattern: "*", action: toAction(rules) }];
     }
-    return Object.keys(rules).map((pattern) => ({ tool, pattern }));
+    return Object.entries(rules).map(([pattern, action]) => ({
+      tool,
+      pattern,
+      action: toAction(action),
+    }));
   });
 }
 
@@ -234,7 +287,7 @@ function buildAgentPermission(agent: Agent): Record<string, unknown> {
 function exportAgents(
   rootDir: string,
   config: HarnessConfig,
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const files: string[] = [];
   for (const agent of config.agents) {
@@ -251,8 +304,7 @@ function exportAgents(
     };
 
     const content = serializeFrontmatter(frontmatter, agent.body);
-    writeIfNotDry(filePath, content, dryRun);
-    files.push(filePath);
+    if (writeIfNotDry(filePath, content, ctx)) files.push(filePath);
   }
   return files;
 }
@@ -260,7 +312,7 @@ function exportAgents(
 function exportCommands(
   rootDir: string,
   config: HarnessConfig,
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const files: string[] = [];
   for (const cmd of config.commands) {
@@ -275,24 +327,27 @@ function exportCommands(
       body = `<!-- Original allowed-tools: ${cmd.allowedTools.join(", ")} -->\n\n${body}`;
     }
     const content = serializeFrontmatter(frontmatter, body);
-    writeIfNotDry(filePath, content, dryRun);
-    files.push(filePath);
+    if (writeIfNotDry(filePath, content, ctx)) files.push(filePath);
   }
   return files;
 }
 
-/** Infer a formatter name from the command string. */
+/**
+ * Name a formatter after the tool it actually runs.
+ *
+ * This previously mapped black/isort/autopep8/yapf all onto the literal name "ruff", so a
+ * project using two of them emitted one entry — the other was silently lost to
+ * `Object.fromEntries` — and the surviving key named a tool the command did not invoke.
+ */
+const KNOWN_FORMATTERS = [
+  "ruff", "black", "isort", "autopep8", "yapf",
+  "prettier", "eslint", "gofmt", "goimports",
+  "rustfmt", "biome", "shfmt",
+];
+
 function inferFormatterName(command: string): string {
-  const COMMAND_NAME_MAP: Record<string, string> = {
-    ruff: "ruff", black: "ruff", isort: "ruff", autopep8: "ruff", yapf: "ruff",
-    prettier: "prettier", eslint: "prettier",
-    gofmt: "gofmt", goimports: "gofmt",
-    rustfmt: "rustfmt",
-    biome: "biome",
-    shfmt: "shfmt",
-  };
-  const match = Object.entries(COMMAND_NAME_MAP).find(([key]) => command.includes(key));
-  return match ? match[1] : slugify(command.split(/\s+/)[0]);
+  const match = KNOWN_FORMATTERS.find((tool) => command.includes(tool));
+  return match ?? slugify(command.split(/\s+/)[0]);
 }
 
 /** Convert glob pattern to file extensions array. */
@@ -307,11 +362,12 @@ function globToExtensions(glob: string): string[] {
 function buildFormatterConfig(
   formatters: Formatter[],
 ): Record<string, Record<string, unknown>> {
+  // uniqueSlugs keeps two formatters from collapsing onto one key.
+  const names = uniqueSlugs(formatters.map((f) => inferFormatterName(f.command)));
   return Object.fromEntries(
-    formatters.map((f) => {
-      const name = inferFormatterName(f.command);
+    formatters.map((f, i) => {
       const parts = f.command.split(/\s+/);
-      return [name, {
+      return [names[i], {
         command: [...parts, "$FILE"],
         extensions: globToExtensions(f.glob),
       }];
@@ -322,14 +378,15 @@ function buildFormatterConfig(
 function exportOpenCodeJson(
   rootDir: string,
   config: HarnessConfig,
-  dryRun: boolean,
+  ctx: WriteContext,
+  writablePermissions: PermissionEntry[],
 ): string[] {
   const openCodeConfig: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
     instructions: ["AGENTS.md"],
     ...(config.mcpServers.length > 0 && { mcp: buildMcpConfig(config.mcpServers) }),
-    ...(config.permissions.length > 0 && {
-      permission: buildPermissionConfig(config.permissions),
+    ...(writablePermissions.length > 0 && {
+      permission: buildPermissionConfig(writablePermissions),
     }),
     ...(config.formatters.length > 0 && {
       formatter: buildFormatterConfig(config.formatters),
@@ -342,7 +399,9 @@ function exportOpenCodeJson(
   }
 
   const filePath = path.join(rootDir, "opencode.json");
-  writeIfNotDry(filePath, `${JSON.stringify(openCodeConfig, null, 2)}\n`, dryRun);
+  if (!writeIfNotDry(filePath, `${JSON.stringify(openCodeConfig, null, 2)}\n`, ctx)) {
+    return [];
+  }
   return [filePath];
 }
 
@@ -380,18 +439,79 @@ function transformPermissionPattern(pattern: string): string {
 }
 
 /**
- * Build the global permission config for opencode.json.
- * Returns warnings for any shorthand-only tools where URL/pattern specificity was lost.
+ * A shorthand-only tool takes one action for every pattern. Collapsing a set that contains a
+ * deny or ask would widen it, so those entries are refused instead — see `partitionPermissions`.
+ */
+function isShorthandOnly(entry: PermissionEntry): boolean {
+  return !GRANULAR_PERMISSIONS.has(entry.tool.toLowerCase());
+}
+
+/** Permission actions OpenCode can express for a tool it has no key for: none. */
+const NO_ACTIONS: ReadonlySet<PermissionAction> = new Set();
+
+/**
+ * Split outgoing permissions into those OpenCode can express and those it cannot.
+ *
+ * Blocked: a deny/ask on a shorthand-only tool, where the only representable form is a
+ * single action covering every pattern — writing it would grant more than the source did.
+ *
+ * A tool OpenCode has no key for at all goes through `permissionStatus`, the single place the
+ * never-weaken rule lives, rather than getting a second decision site here.
+ */
+function partitionPermissions(permissions: PermissionEntry[]): {
+  writable: PermissionEntry[];
+  items: FidelityItem[];
+} {
+  const writable: PermissionEntry[] = [];
+  const items: FidelityItem[] = [];
+
+  for (const p of permissions) {
+    const name = `${p.tool}(${p.pattern})`;
+    if (UNREPRESENTABLE_TOOLS.has(p.tool.toLowerCase())) {
+      items.push(permissionStatus(p, NO_ACTIONS, `OpenCode (no "${p.tool}" permission key)`));
+      continue;
+    }
+    if (p.action !== "allow" && isShorthandOnly(p)) {
+      items.push({
+        phase: "export",
+        kind: "permission",
+        name,
+        status: "blocked",
+        reason: `OpenCode expresses "${p.tool}" only as a single shorthand action, so this "${p.action}" rule cannot be written without widening it`,
+      });
+      continue;
+    }
+    writable.push(p);
+    items.push({
+      phase: "export",
+      kind: "permission",
+      name,
+      status: isShorthandOnly(p) && p.pattern !== "*" ? "lossy" : "exact",
+      ...(isShorthandOnly(p) &&
+        p.pattern !== "*" && {
+          reason: `OpenCode has no granular patterns for "${p.tool}"; the pattern was flattened to a shorthand "${p.action}"`,
+        }),
+    });
+  }
+
+  return { writable, items };
+}
+
+/**
+ * Build the global permission config for opencode.json from entries already cleared for writing.
+ * `partitionPermissions` has already removed the tools OpenCode has no key for.
  */
 function buildPermissionConfig(
   permissions: PermissionEntry[],
 ): Record<string, Record<string, string> | string> {
   const grouped = permissions
-    .filter((p) => p.tool.toLowerCase() !== "websearch")
     .reduce<Record<string, Array<{ pattern: string; action: string }>>>((acc, p) => {
       const toolKey = p.tool.toLowerCase();
       if (!acc[toolKey]) acc[toolKey] = [];
-      acc[toolKey].push({ pattern: transformPermissionPattern(p.pattern), action: "allow" });
+      acc[toolKey].push({
+        pattern: transformPermissionPattern(p.pattern),
+        action: p.action,
+      });
       return acc;
     }, {});
 
@@ -400,33 +520,30 @@ function buildPermissionConfig(
       if (GRANULAR_PERMISSIONS.has(tool)) {
         return [tool, Object.fromEntries(rules.map((r) => [r.pattern, r.action]))];
       }
-      // Shorthand-only: collapse all patterns to a single action
-      const action = rules.some((r) => r.action === "allow") ? "allow" : "ask";
-      return [tool, action];
+      // Shorthand-only: only allow entries reach here, so collapsing cannot widen.
+      return [tool, "allow"];
     }),
   );
-}
-
-/**
- * Detect shorthand-only permissions that had specific patterns which were flattened.
- */
-function detectFlattenedPermissionWarnings(permissions: PermissionEntry[]): string[] {
-  const shorthandWithPatterns = permissions.filter(
-    (p) => !GRANULAR_PERMISSIONS.has(p.tool.toLowerCase()) && p.pattern !== "*",
-  );
-
-  if (shorthandWithPatterns.length === 0) return [];
-
-  const tools = [...new Set(shorthandWithPatterns.map((p) => p.tool))];
-  return [
-    `${tools.join(", ")} permission(s) had URL/pattern-specific rules that were flattened to shorthand "allow". OpenCode does not support granular patterns for these tools.`,
-  ];
 }
 
 // --- Converter ---
 
 export const opencodeConverter: Converter = {
   name: "opencode",
+  label: "OpenCode",
+  // OpenCode's only tool-event mechanism is the formatter, which is a separate feature here. It
+  // has no general hook config, so a Hook has nowhere to go.
+  capabilities: {
+    rule: "full",
+    agent: "full",
+    skill: "full",
+    command: "full",
+    mcp: "full",
+    permission: "full",
+    hook: "none",
+    formatter: "full",
+  },
+  permissionActions: ALL_ACTIONS,
 
   detect(rootDir: string): boolean {
     return (
@@ -437,7 +554,6 @@ export const opencodeConverter: Converter = {
   },
 
   import(rootDir: string): HarnessConfig {
-    const warnings: string[] = [];
     const { mcpServers, permissions, formatters } = importMcpAndConfig(rootDir);
 
     return {
@@ -452,45 +568,86 @@ export const opencodeConverter: Converter = {
       permissions,
       hooks: [],
       formatters,
-      warnings,
+      items: takeReadProblems(),
     };
   },
 
   export(
     rootDir: string,
     config: HarnessConfig,
-    dryRun = false,
+    options: ExportOptions = {},
   ): ExportResult {
-    const warnings: string[] = [...config.warnings];
+    const ctx = newWriteContext(options);
+    const items: FidelityItem[] = [...config.items];
+    const { writable, items: permissionItems } = partitionPermissions(config.permissions);
+
     const filesWritten: string[] = [
       ...exportRulesToFile(
         path.join(rootDir, "AGENTS.md"),
         config.rules,
-        dryRun,
+        ctx,
       ),
-      ...exportAgents(rootDir, config, dryRun),
+      ...exportAgents(rootDir, config, ctx),
       ...exportSkillsToDir(
         path.join(rootDir, ".opencode", "skills"),
         config.skills,
-        dryRun,
+        ctx,
       ),
-      ...exportCommands(rootDir, config, dryRun),
-      ...exportOpenCodeJson(rootDir, config, dryRun),
+      ...exportCommands(rootDir, config, ctx),
+      ...exportOpenCodeJson(rootDir, config, ctx, writable),
     ];
 
-    warnings.push(...detectFlattenedPermissionWarnings(config.permissions));
+    items.push(
+      ...permissionItems,
+      ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
+      ...exactItems("skill", config.skills.map((s) => s.name)),
+      ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
+      ...exactItems("formatter", config.formatters.map((f) => f.glob)),
+    );
 
-    if (config.hooks.length > 0) {
-      warnings.push(
-        `${config.hooks.length} hook(s) could not be converted. OpenCode only supports formatters (PostToolUse on Edit/Write). Non-formatter hooks were dropped.`,
-      );
-    }
-    if (config.agents.some((a) => a.skills && a.skills.length > 0)) {
-      warnings.push(
-        'Claude agent "skills" references were converted to OpenCode permission.skill patterns (deny-by-default, allow listed skills).',
-      );
+    for (const hook of config.hooks) {
+      items.push({
+        phase: "export",
+        kind: "hook",
+        name: hook.event,
+        // Nothing is written for a hook, so this is `dropped`, not `lossy`. `lossy` means the
+        // content reached the target with a field removed; the distinction is what lets a reader
+        // tell "in the file, minus a detail" from "not in the file at all".
+        status: "dropped",
+        reason:
+          "OpenCode supports only formatters (PostToolUse on Edit/Write); this hook was dropped",
+      });
     }
 
-    return { filesWritten, warnings };
+    for (const cmd of config.commands) {
+      const lostTools = cmd.allowedTools && cmd.allowedTools.length > 0;
+      items.push({
+        phase: "export",
+        kind: "command",
+        name: cmd.name,
+        status: lostTools ? "lossy" : "exact",
+        ...(lostTools && {
+          reason:
+            "OpenCode commands have no allowed-tools field; the original list was kept as an HTML comment",
+        }),
+      });
+    }
+
+    for (const agent of config.agents) {
+      const remapped = agent.skills && agent.skills.length > 0;
+      items.push({
+        phase: "export",
+        kind: "agent",
+        name: agent.name,
+        status: remapped ? "lossy" : "exact",
+        ...(remapped && {
+          reason:
+            'agent "skills" were remapped onto OpenCode permission.skill patterns (deny-by-default, listed skills allowed)',
+        }),
+      });
+    }
+
+    items.push(...ctx.items);
+    return { filesWritten, items };
   },
 };

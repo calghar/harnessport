@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { claudeConverter } from "../src/converters/claude.js";
 import { opencodeConverter } from "../src/converters/opencode.js";
 import { cursorConverter } from "../src/converters/cursor.js";
@@ -7,7 +8,9 @@ import { windsurfConverter } from "../src/converters/windsurf.js";
 import { copilotConverter } from "../src/converters/copilot.js";
 import { codexConverter } from "../src/converters/codex.js";
 
-const FIXTURE = path.resolve(__dirname, "fixtures", "sample-project");
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+const FIXTURE = path.resolve(HERE, "fixtures", "sample-project");
 
 describe("claude importer", () => {
   it("detects claude config", () => {
@@ -70,29 +73,31 @@ describe("claude importer", () => {
 describe("opencode exporter", () => {
   it("dry-run produces correct file count", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = opencodeConverter.export("/tmp/test-out", config, true);
+    const result = opencodeConverter.export("/tmp/test-out", config, { dryRun: true });
     // rules(1) + agents(2) + skills(1) + commands(1) + opencode.json(1) = 6
     expect(result.filesWritten.length).toBe(6);
   });
 
-  it("warns about dropped skills references", () => {
+  it("reports agent skill references as remapped", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = opencodeConverter.export("/tmp/test-out", config, true);
-    expect(result.warnings.some((w) => w.includes("skills"))).toBe(true);
+    const result = opencodeConverter.export("/tmp/test-out", config, { dryRun: true });
+    expect(
+      result.items.some((i) => i.kind === "agent" && /skills/.test(i.reason ?? "")),
+    ).toBe(true);
   });
 });
 
 describe("cursor exporter", () => {
   it("dry-run produces rules and mcp files", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = cursorConverter.export("/tmp/test-cursor", config, true);
+    const result = cursorConverter.export("/tmp/test-cursor", config, { dryRun: true });
     expect(result.filesWritten.some((f) => f.endsWith(".mdc"))).toBe(true);
     expect(result.filesWritten.some((f) => f.endsWith("mcp.json"))).toBe(true);
   });
 
   it("exports agents, skills, and commands", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = cursorConverter.export("/tmp/test-cursor", config, true);
+    const result = cursorConverter.export("/tmp/test-cursor", config, { dryRun: true });
     expect(result.filesWritten.some((f) => f.includes("/agents/"))).toBe(true);
     expect(result.filesWritten.some((f) => f.includes("SKILL.md"))).toBe(true);
     expect(result.filesWritten.some((f) => f.includes("/commands/"))).toBe(true);
@@ -102,7 +107,7 @@ describe("cursor exporter", () => {
 describe("windsurf exporter", () => {
   it("dry-run produces rules and skills", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = windsurfConverter.export("/tmp/test-windsurf", config, true);
+    const result = windsurfConverter.export("/tmp/test-windsurf", config, { dryRun: true });
     expect(result.filesWritten.some((f) => f.includes(".windsurf/rules/"))).toBe(true);
     expect(result.filesWritten.some((f) => f.includes("SKILL.md"))).toBe(true);
   });
@@ -111,7 +116,7 @@ describe("windsurf exporter", () => {
 describe("copilot exporter", () => {
   it("dry-run produces copilot-instructions.md", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = copilotConverter.export("/tmp/test-copilot", config, true);
+    const result = copilotConverter.export("/tmp/test-copilot", config, { dryRun: true });
     expect(
       result.filesWritten.some((f) => f.includes("copilot-instructions.md")),
     ).toBe(true);
@@ -119,7 +124,7 @@ describe("copilot exporter", () => {
 
   it("exports MCP, agents, skills, prompts, and hooks", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = copilotConverter.export("/tmp/test-copilot", config, true);
+    const result = copilotConverter.export("/tmp/test-copilot", config, { dryRun: true });
     expect(result.filesWritten.some((f) => f.includes("mcp-config.json"))).toBe(true);
     expect(result.filesWritten.some((f) => f.includes(".agent.md"))).toBe(true);
     expect(result.filesWritten.some((f) => f.includes("SKILL.md"))).toBe(true);
@@ -129,23 +134,20 @@ describe("copilot exporter", () => {
 describe("codex exporter", () => {
   it("dry-run produces AGENTS.md and skills", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = codexConverter.export("/tmp/test-codex", config, true);
+    const result = codexConverter.export("/tmp/test-codex", config, { dryRun: true });
     expect(result.filesWritten.some((f) => f.endsWith("AGENTS.md"))).toBe(true);
     expect(result.filesWritten.some((f) => f.includes("SKILL.md"))).toBe(true);
   });
 
-  it("warns about MCP and commands", () => {
+  it("reports MCP servers and commands as dropped", () => {
     const config = claudeConverter.import(FIXTURE);
-    const result = codexConverter.export("/tmp/test-codex", config, true);
-    expect(result.warnings.some((w) => w.includes("MCP"))).toBe(true);
-    expect(result.warnings.some((w) => w.includes("command"))).toBe(true);
+    const result = codexConverter.export("/tmp/test-codex", config, { dryRun: true });
+    const dropped = result.items.filter((i) => i.status === "dropped");
+    expect(dropped.some((i) => i.kind === "mcp")).toBe(true);
+    expect(dropped.some((i) => i.kind === "command")).toBe(true);
   });
 });
 
-describe("round-trip: claude -> opencode -> claude", () => {
-  it("preserves MCP server count through round-trip", () => {
-    const original = claudeConverter.import(FIXTURE);
-    expect(original.mcpServers.length).toBe(2);
-    expect(original.mcpServers.every((s) => s.name)).toBe(true);
-  });
-});
+// The block that stood here was named "round-trip: claude -> opencode -> claude" but performed
+// no export and no re-import — it asserted on the original config, so it could not fail for any
+// conversion defect. Real round trips over all 30 ordered pairs live in tests/matrix.test.ts.

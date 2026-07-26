@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # vitest 4 pulls in rolldown, which imports `styleText` from node:util (Node 20.12+),
+        # so the suite cannot run on Node 18. The package still supports 18 — the `smoke` job
+        # below verifies that against the built artifact.
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+
+      # Build first: the CLI-level tests assert exit codes and stdout/stderr routing against
+      # dist/index.js, and skip themselves when it is absent.
+      - run: npm run build
+
+      - run: npm run check
+
+  smoke:
+    # package.json declares engines >=18. The test runner cannot run there, so exercise the
+    # built CLI directly rather than dropping a supported platform or claiming it untested.
+    name: smoke (node 18, oldest supported engine)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Convert, verify, and check a fixture
+        run: |
+          set -euo pipefail
+          node dist/index.js --version
+          node dist/index.js list
+          node dist/index.js detect tests/fixtures/sample-project
+          node dist/index.js convert --from claude --to opencode \
+            --source tests/fixtures/sample-project --target "$RUNNER_TEMP/out"
+          test -f "$RUNNER_TEMP/out/opencode.json"
+          node dist/index.js verify tests/fixtures/sample-project --from claude --to cursor
+          node dist/index.js check tests/fixtures/sample-project

@@ -1,6 +1,6 @@
 {
   "name": "harnessport",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Convert AI coding harness configs (rules, agents, skills, commands, MCP, hooks, permissions) between Claude Code, OpenCode, Cursor, Windsurf, Copilot, and Codex CLI",
   "type": "module",
   "main": "dist/index.js",
@@ -10,16 +10,19 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome lint src/ tests/",
-    "lint:fix": "biome lint --write --unsafe src/ tests/",
-    "check": "npm run typecheck && npm run lint && npm run test",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.check.json",
+    "lint": "biome lint src/ tests/ scripts/",
+    "lint:fix": "biome lint --write --unsafe src/ tests/ scripts/",
+    "docs:matrix": "tsx scripts/sync-readme.ts",
+    "docs:check": "tsx scripts/sync-readme.ts --check",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run docs:check",
     "prepublishOnly": "npm run check && npm run build",
     "prepare": "husky"
   },
@@ -57,9 +60,7 @@
   },
   "dependencies": {
     "commander": "^14.0.3",
-    "gray-matter": "^4.0.3",
-    "yaml": "^2.8.3",
-    "zod": "^4.3.6"
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.13",

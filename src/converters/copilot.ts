@@ -1,13 +1,16 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Converter, ExportResult } from "./types.js";
+import type { Converter, ExportOptions, ExportResult } from "./types.js";
+import { NO_PERMISSIONS } from "./types.js";
 import type {
   HarnessConfig,
   Rule,
   Agent,
   Command,
+  FidelityItem,
   Hook,
 } from "../schema.js";
+import type { WriteContext } from "../utils.js";
 import {
   parseFrontmatter,
   serializeFrontmatter,
@@ -19,8 +22,12 @@ import {
   exportSkillsToDir,
   importMcpFromJson,
   exportMcpToJson,
-  generateDropWarnings,
+  exactItems,
+  permissionStatus,
   writeIfNotDry,
+  uniqueSlugs,
+  takeReadProblems,
+  newWriteContext,
   slugify,
   listMdFiles,
   readJsonIfExists,
@@ -139,7 +146,7 @@ function importHooks(rootDir: string): Hook[] {
 function exportRules(
   rootDir: string,
   config: HarnessConfig,
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const files: string[] = [];
 
@@ -154,25 +161,30 @@ function exportRules(
   if (alwaysRules.length > 0) {
     const combined = alwaysRules.map((r) => r.content).join("\n\n---\n\n");
     const filePath = path.join(rootDir, ".github", "copilot-instructions.md");
-    writeIfNotDry(filePath, combined, dryRun);
-    files.push(filePath);
+    if (writeIfNotDry(filePath, combined, ctx)) files.push(filePath);
   }
 
   const instructionsDir = path.join(rootDir, ".github", "instructions");
-  for (const rule of [...globRules, ...descriptionRules]) {
-    const baseName = rule.source
-      ? slugify(path.basename(rule.source, path.extname(rule.source)))
-      : "rule";
-    const fileName = `${baseName}.instructions.md`;
-    const filePath = path.join(instructionsDir, fileName);
+  const scoped = [...globRules, ...descriptionRules];
+  // Rules with no source all fell back to the literal name "rule", so N of them collapsed
+  // onto one file. uniqueSlugs keeps each distinct.
+  const baseNames = uniqueSlugs(
+    scoped.map((rule) =>
+      rule.source
+        ? path.basename(rule.source, path.extname(rule.source))
+        : "rule",
+    ),
+  );
+
+  scoped.forEach((rule, i) => {
+    const filePath = path.join(instructionsDir, `${baseNames[i]}.instructions.md`);
 
     const frontmatter: Record<string, unknown> = {};
     if (rule.globs) frontmatter.applyTo = rule.globs;
 
     const content = serializeFrontmatter(frontmatter, rule.content);
-    writeIfNotDry(filePath, content, dryRun);
-    files.push(filePath);
-  }
+    if (writeIfNotDry(filePath, content, ctx)) files.push(filePath);
+  });
 
   return files;
 }
@@ -180,7 +192,7 @@ function exportRules(
 function exportAgents(
   rootDir: string,
   agents: Agent[],
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const files: string[] = [];
   for (const agent of agents) {
@@ -193,8 +205,7 @@ function exportAgents(
       tools: agent.tools,
     };
     const content = serializeFrontmatter(frontmatter, agent.body);
-    writeIfNotDry(filePath, content, dryRun);
-    files.push(filePath);
+    if (writeIfNotDry(filePath, content, ctx)) files.push(filePath);
   }
   return files;
 }
@@ -202,7 +213,7 @@ function exportAgents(
 function exportCommands(
   rootDir: string,
   commands: Command[],
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   const files: string[] = [];
   for (const cmd of commands) {
@@ -214,8 +225,7 @@ function exportCommands(
       agent: cmd.agent,
     };
     const content = serializeFrontmatter(frontmatter, cmd.body);
-    writeIfNotDry(filePath, content, dryRun);
-    files.push(filePath);
+    if (writeIfNotDry(filePath, content, ctx)) files.push(filePath);
   }
   return files;
 }
@@ -223,7 +233,7 @@ function exportCommands(
 function exportHooks(
   rootDir: string,
   hooks: Hook[],
-  dryRun: boolean,
+  ctx: WriteContext,
 ): string[] {
   if (hooks.length === 0) return [];
 
@@ -235,12 +245,25 @@ function exportHooks(
   }, {});
 
   const filePath = path.join(rootDir, ".github", "hooks", "hooks.json");
-  writeIfNotDry(filePath, `${JSON.stringify(grouped, null, 2)}\n`, dryRun);
+  if (!writeIfNotDry(filePath, `${JSON.stringify(grouped, null, 2)}\n`, ctx)) return [];
   return [filePath];
 }
 
 export const copilotConverter: Converter = {
   name: "copilot",
+  label: "Copilot",
+  // Copilot's hooks run on tool-use events but do not format files, so a Formatter has no target.
+  capabilities: {
+    rule: "full",
+    agent: "full",
+    skill: "full",
+    command: "full",
+    mcp: "full",
+    permission: "none",
+    hook: "full",
+    formatter: "none",
+  },
+  permissionActions: NO_PERMISSIONS,
 
   detect(rootDir: string): boolean {
     return (
@@ -255,7 +278,6 @@ export const copilotConverter: Converter = {
   },
 
   import(rootDir: string): HarnessConfig {
-    const warnings: string[] = [];
     return {
       rules: importRules(rootDir),
       agents: importAgents(rootDir),
@@ -265,44 +287,58 @@ export const copilotConverter: Converter = {
       permissions: [],
       hooks: importHooks(rootDir),
       formatters: [],
-      warnings,
+      items: takeReadProblems(),
     };
   },
 
   export(
     rootDir: string,
     config: HarnessConfig,
-    dryRun = false,
+    options: ExportOptions = {},
   ): ExportResult {
-    const warnings: string[] = [...config.warnings];
+    const ctx = newWriteContext(options);
+    const items: FidelityItem[] = [...config.items];
     const filesWritten: string[] = [
-      ...exportRules(rootDir, config, dryRun),
-      ...exportAgents(rootDir, config.agents, dryRun),
+      ...exportRules(rootDir, config, ctx),
+      ...exportAgents(rootDir, config.agents, ctx),
       ...exportSkillsToDir(
         path.join(rootDir, ".github", "skills"),
         config.skills,
-        dryRun,
+        ctx,
       ),
-      ...exportCommands(rootDir, config.commands, dryRun),
+      ...exportCommands(rootDir, config.commands, ctx),
       ...exportMcpToJson(
         path.join(rootDir, ".copilot", "mcp-config.json"),
         config.mcpServers,
-        dryRun,
+        ctx,
       ),
-      ...exportHooks(rootDir, config.hooks, dryRun),
+      ...exportHooks(rootDir, config.hooks, ctx),
     ];
 
-    warnings.push(...generateDropWarnings(config, {
-      permissions: "Permissions dropped. Copilot has no project-level permission config.",
-    }));
+    items.push(
+      ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
+      ...exactItems("agent", config.agents.map((a) => a.name)),
+      ...exactItems("skill", config.skills.map((s) => s.name)),
+      ...exactItems("command", config.commands.map((c) => c.name)),
+      ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
+      ...exactItems("hook", config.hooks.map((h) => h.event)),
+      ...config.permissions.map((p) =>
+        permissionStatus(p, copilotConverter.permissionActions, "Copilot"),
+      ),
+    );
 
-    // Formatters don't have a direct equivalent in Copilot
-    if (config.formatters.length > 0) {
-      warnings.push(
-        "Formatters dropped. Copilot hooks can run scripts on tool use events, but formatters were exported as hooks instead.",
-      );
+    for (const fmt of config.formatters) {
+      items.push({
+        phase: "export",
+        kind: "formatter",
+        name: fmt.glob,
+        status: "dropped",
+        reason:
+          "Copilot has no formatter config; its hooks run on tool-use events but do not format files",
+      });
     }
 
-    return { filesWritten, warnings };
+    items.push(...ctx.items);
+    return { filesWritten, items };
   },
 };

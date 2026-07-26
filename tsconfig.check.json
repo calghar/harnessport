@@ -1,0 +1,17 @@
+// The build's rootDir is `src`, so scripts/ and tests/ are invisible to `tsc`. This config
+// type-checks them without emitting, so a test or build tool importing from src cannot rot
+// unnoticed. Referenced by `npm run typecheck`.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["node", "vitest/globals"]
+  },
+  // `exclude` is inherited from the base config, which lists "tests" — so without this override
+  // tsc silently reports success while checking nothing.
+  "exclude": ["node_modules", "dist"],
+  "include": ["scripts", "src", "tests"]
+}

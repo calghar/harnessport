@@ -1,90 +1,128 @@
-import { z } from "zod";
-
 // --- Canonical intermediate schema ---
+//
+// Plain types, not a validation library. Every value here is constructed by our own importers,
+// which the compiler already checks; nothing arrives from the network. The one place runtime
+// checking matters is reading a user's config file, and there the requirement is only to tell
+// "absent" from "malformed" — which `JSON.parse` throwing already answers. Validating shape on
+// top of that would reject configs that are structurally fine but unexpected, which is the wrong
+// instinct for a tool whose job is to be liberal in what it accepts.
 
-export const RuleSchema = z.object({
-  content: z.string(),
-  source: z.string().optional(), // original filename
-  description: z.string().optional(), // for agent-requested activation (Cursor/Windsurf)
-  globs: z.string().optional(), // file-scoped activation pattern
-  alwaysApply: z.boolean().optional(), // always-on activation flag
-});
+export interface Rule {
+  content: string;
+  source?: string; // original filename
+  description?: string; // for agent-requested activation (Cursor/Windsurf)
+  globs?: string; // file-scoped activation pattern
+  alwaysApply?: boolean; // always-on activation flag
+}
 
-export const AgentSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  model: z.string().optional(),
-  body: z.string(), // markdown body (post-frontmatter)
-  skills: z.array(z.string()).optional(),
-  tools: z.array(z.string()).optional(),
+export interface Agent {
+  name: string;
+  description?: string;
+  model?: string;
+  body: string; // markdown body (post-frontmatter)
+  skills?: string[];
+  tools?: string[];
   // OpenCode-specific fields preserved for round-trip
-  mode: z.enum(["primary", "subagent"]).optional(),
-  temperature: z.number().optional(),
-  permissions: z
-    .record(z.string(), z.union([z.string(), z.record(z.string(), z.string())]))
-    .optional(),
-});
+  mode?: "primary" | "subagent";
+  temperature?: number;
+  permissions?: Record<string, string | Record<string, string>>;
+}
 
-export const SkillSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  body: z.string(), // markdown body
-});
+export interface Skill {
+  name: string;
+  description?: string;
+  body: string; // markdown body
+}
 
-export const CommandSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  body: z.string(), // markdown body
-  allowedTools: z.array(z.string()).optional(), // Claude-specific
-  agent: z.string().optional(), // OpenCode-specific
-});
+export interface Command {
+  name: string;
+  description?: string;
+  body: string; // markdown body
+  allowedTools?: string[]; // Claude-specific
+  agent?: string; // OpenCode-specific
+}
 
-export const McpServerSchema = z.object({
-  name: z.string(),
-  type: z.enum(["stdio", "http"]),
-  command: z.string().optional(),
-  args: z.array(z.string()).optional(),
-  url: z.string().optional(),
-  env: z.record(z.string(), z.string()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  enabled: z.boolean().optional(),
-});
+export interface McpServer {
+  name: string;
+  type: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+}
 
-export const PermissionEntrySchema = z.object({
-  tool: z.string(), // e.g. "Bash", "WebFetch", "WebSearch"
-  pattern: z.string(), // e.g. "git add *", "domain:github.com"
-});
+export type PermissionAction = "allow" | "ask" | "deny";
 
-export const HookSchema = z.object({
-  event: z.string(), // e.g. "PostToolUse"
-  matcher: z.string().optional(), // e.g. "Edit|Write|MultiEdit"
-  command: z.string(),
-});
+export interface PermissionEntry {
+  tool: string; // e.g. "Bash", "WebFetch", "WebSearch"
+  pattern: string; // e.g. "git add *", "domain:github.com"
+  // Sources that express no action import as "allow". A deny/ask is never emitted as an
+  // allow — a target that cannot represent it blocks the entry instead. See permissionStatus.
+  action: PermissionAction;
+}
 
-export const FormatterSchema = z.object({
-  glob: z.string(),
-  command: z.string(),
-});
+export interface Hook {
+  event: string; // e.g. "PostToolUse"
+  matcher?: string; // e.g. "Edit|Write|MultiEdit"
+  command: string;
+}
 
-export const HarnessConfigSchema = z.object({
-  rules: z.array(RuleSchema).default([]),
-  agents: z.array(AgentSchema).default([]),
-  skills: z.array(SkillSchema).default([]),
-  commands: z.array(CommandSchema).default([]),
-  mcpServers: z.array(McpServerSchema).default([]),
-  permissions: z.array(PermissionEntrySchema).default([]),
-  hooks: z.array(HookSchema).default([]),
-  formatters: z.array(FormatterSchema).default([]),
-  warnings: z.array(z.string()).default([]),
-});
+export interface Formatter {
+  glob: string;
+  command: string;
+}
 
-// Inferred types
-export type Rule = z.infer<typeof RuleSchema>;
-export type Agent = z.infer<typeof AgentSchema>;
-export type Skill = z.infer<typeof SkillSchema>;
-export type Command = z.infer<typeof CommandSchema>;
-export type McpServer = z.infer<typeof McpServerSchema>;
-export type PermissionEntry = z.infer<typeof PermissionEntrySchema>;
-export type Hook = z.infer<typeof HookSchema>;
-export type Formatter = z.infer<typeof FormatterSchema>;
-export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
+/**
+ * The eight things a harness config can hold.
+ *
+ * Named rather than left inline because `Converter.capabilities` is keyed by it: a ninth feature
+ * then breaks every converter at compile time until each declares what it does with it, instead of
+ * being added to the fidelity report and forgotten in the support matrix.
+ */
+export type Feature =
+  | "rule"
+  | "agent"
+  | "skill"
+  | "command"
+  | "mcp"
+  | "permission"
+  | "hook"
+  | "formatter";
+
+/**
+ * One thing that crossed (or failed to cross) a conversion boundary.
+ *
+ * `exact`   — represented fully, nothing dropped.
+ * `lossy`   — written, but with detail the target cannot hold dropped.
+ * `dropped` — not written, because the target has no equivalent concept. Expected, not an error.
+ * `blocked` — refused, because writing it would misrepresent the source, weaken a security
+ *             posture, or destroy an existing file. Exceptional: the only status that fails the
+ *             run (exit 2).
+ *
+ * The `dropped`/`blocked` split is what makes the exit code meaningful. Windsurf having no
+ * agent concept is ordinary; declining to rewrite a deny rule as an allow is not.
+ *
+ * This is the single representation of conversion fidelity: human output and `--json` both
+ * render from it, so they cannot disagree.
+ */
+export interface FidelityItem {
+  phase: "import" | "export";
+  kind: Feature;
+  name: string;
+  status: "exact" | "lossy" | "dropped" | "blocked";
+  reason?: string; // required in practice for anything but "exact"
+}
+
+export interface HarnessConfig {
+  rules: Rule[];
+  agents: Agent[];
+  skills: Skill[];
+  commands: Command[];
+  mcpServers: McpServer[];
+  permissions: PermissionEntry[];
+  hooks: Hook[];
+  formatters: Formatter[];
+  items: FidelityItem[];
+}

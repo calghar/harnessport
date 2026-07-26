@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The reason given for a permission dropped on the way to OpenCode said OpenCode "has no
+  project-level permission config". It has one; it has no `websearch` key. The report now names
+  the missing key. Statuses and exit codes were correct throughout — only the explanation was
+  wrong.
+
 ## [0.2.0] - 2026-07-26
 
 ### Security

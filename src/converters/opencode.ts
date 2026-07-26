@@ -468,7 +468,10 @@ function partitionPermissions(permissions: PermissionEntry[]): {
   for (const p of permissions) {
     const name = `${p.tool}(${p.pattern})`;
     if (UNREPRESENTABLE_TOOLS.has(p.tool.toLowerCase())) {
-      items.push(permissionStatus(p, NO_ACTIONS, `OpenCode (no "${p.tool}" permission key)`));
+      // OpenCode does have project-level permissions; it simply has no key for this tool.
+      items.push(
+        permissionStatus(p, NO_ACTIONS, "OpenCode", `has no "${p.tool}" permission key`),
+      );
       continue;
     }
     if (p.action !== "allow" && isShorthandOnly(p)) {

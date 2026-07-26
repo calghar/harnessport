@@ -1,6 +1,6 @@
 {
   "name": "harnessport",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Convert AI coding harness configs (rules, agents, skills, commands, MCP, hooks, permissions) between Claude Code, OpenCode, Cursor, Windsurf, Copilot, and Codex CLI",
   "type": "module",
   "main": "dist/index.js",

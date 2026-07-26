@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-26
+
 ### Fixed
 
 - The reason given for a permission dropped on the way to OpenCode said OpenCode "has no
@@ -141,6 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formatters between Claude Code, OpenCode, Cursor, Windsurf, GitHub Copilot, and Codex CLI.
 - `convert`, `detect`, and `list` commands, with `--dry-run` on `convert`.
 
-[Unreleased]: https://github.com/calghar/harnessport/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/calghar/harnessport/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/calghar/harnessport/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/calghar/harnessport/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/calghar/harnessport/releases/tag/v0.1.2

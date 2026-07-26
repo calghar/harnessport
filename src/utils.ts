@@ -513,11 +513,18 @@ export function exportRulesToFile(
  *
  * An `allow` the target cannot represent is merely `lossy`: dropping a permission the user
  * already granted cannot widen their posture.
+ *
+ * `limitation` states why this target cannot hold the entry, as a clause following the target's
+ * name. It defaults to the whole-harness case — four of the six targets have no permission model
+ * at all — but a target that has permissions and merely lacks a key for one tool must say so:
+ * telling an OpenCode user it "has no project-level permission config" is false, and a fidelity
+ * report that misdescribes the target undermines the one thing it exists to do.
  */
 export function permissionStatus(
   entry: PermissionEntry,
   targetActions: ReadonlySet<PermissionAction>,
   targetName: string,
+  limitation = "has no project-level permission config",
 ): FidelityItem {
   const name = `${entry.tool}(${entry.pattern})`;
   if (targetActions.has(entry.action)) {
@@ -528,8 +535,8 @@ export function permissionStatus(
   const status = entry.action === "allow" ? "dropped" : "blocked";
   const reason =
     status === "blocked"
-      ? `${targetName} cannot express a "${entry.action}" permission; refusing to emit it as an allow`
-      : `${targetName} has no project-level permission config, so this allow rule was dropped`;
+      ? `${targetName} ${limitation}; refusing to emit this "${entry.action}" rule as an allow`
+      : `${targetName} ${limitation}, so this allow rule was dropped`;
   return { phase: "export", kind: "permission", name, status, reason };
 }
 

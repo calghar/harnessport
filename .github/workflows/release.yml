@@ -21,14 +21,32 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run build
+
       - run: npm run check
 
+      # No continue-on-error. A failed publish used to leave this workflow green, so v0.2.0
+      # reported success while npm kept serving 0.1.2 — the token had expired and nothing said so.
       - name: Publish to npm
-        continue-on-error: true
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
+      # Trust the registry, not the exit code.
+      - name: Verify the registry serves this tag
+        run: |
+          set -euo pipefail
+          expected="${GITHUB_REF_NAME#v}"
+          for attempt in $(seq 1 10); do
+            published=$(npm view harnessport version 2>/dev/null || echo "")
+            [ "$published" = "$expected" ] && echo "npm serves $published" && exit 0
+            echo "attempt $attempt: npm serves '${published:-nothing}', want $expected"
+            sleep 6
+          done
+          echo "::error::npm never served $expected"
+          exit 1
+
+      # Last, so a release is never announced for a version nobody can install.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

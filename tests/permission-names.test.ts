@@ -5,6 +5,7 @@ import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { claudeConverter } from "../src/converters/claude.js";
 import { opencodeConverter } from "../src/converters/opencode.js";
+import { cursorConverter } from "../src/converters/cursor.js";
 import type { HarnessConfig, PermissionAction } from "../src/schema.js";
 
 // Mirrors features/permission-fidelity.feature and features/conversion-reporting.feature,
@@ -122,6 +123,30 @@ describe("Requirement: A permission OpenCode does not write is not reported exac
       {},
     );
     expect(result.items.find((i) => i.kind === "permission")?.status).toBe("blocked");
+  });
+
+  // The reason is the product of the whole tool. Saying OpenCode "has no project-level
+  // permission config" is simply untrue — it has one, without a websearch key.
+  it("The reason names the missing key, not a missing permission model", () => {
+    const result = opencodeConverter.export(
+      tmpDir(),
+      withPermission("WebSearch", "*", "allow"),
+      {},
+    );
+    const reason = result.items.find((i) => i.kind === "permission")?.reason ?? "";
+    expect(reason).toContain('has no "WebSearch" permission key');
+    expect(reason).not.toContain("no project-level permission config");
+  });
+
+  it("A target with no permission model at all still says so", () => {
+    const result = cursorConverter.export(
+      tmpDir(),
+      withPermission("Bash", "rm -rf *", "allow"),
+      {},
+    );
+    expect(result.items.find((i) => i.kind === "permission")?.reason).toContain(
+      "has no project-level permission config",
+    );
   });
 
   it("WebFetch is unaffected", () => {

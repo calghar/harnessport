@@ -4,3 +4,8 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Test fixtures are inputs, not real settings. Many contributors globally ignore
+# **/.claude/settings.local.json, which silently drops these from commits and turns the
+# permission tests red on CI only.
+!tests/fixtures/**/.claude/settings.local.json

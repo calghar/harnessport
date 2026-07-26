@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": ["WebSearch"],
+    "deny": ["Read(./.env)"],
+    "ask": ["Bash(git push *)"]
+  }
+}

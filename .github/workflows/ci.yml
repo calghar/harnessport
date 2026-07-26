@@ -22,6 +22,9 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run check
-
+      # Build first: the CLI-level tests assert exit codes and stdout/stderr routing against
+      # dist/index.js, and skip themselves when it is absent. Running check first silently
+      # skipped 21 of them.
       - run: npm run build
+
+      - run: npm run check

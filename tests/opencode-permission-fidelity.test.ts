@@ -5,7 +5,6 @@ import * as os from "node:os";
 import { opencodeConverter } from "../src/converters/opencode.js";
 import type { FidelityItem, HarnessConfig, PermissionAction } from "../src/schema.js";
 
-// Mirrors openspec/changes/opencode-permission-fidelity/specs/opencode-permissions/spec.md.
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "harnessport-ocpf-"));

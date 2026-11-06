@@ -5,7 +5,6 @@ import * as path from "node:path";
 import { codexConverter } from "../src/converters/codex.js";
 import type { HarnessConfig, Hook, PermissionEntry } from "../src/schema.js";
 
-// Mirrors openspec/changes/codex-permission-fidelity/specs/codex-permission-fidelity/spec.md.
 
 function config(over: Partial<HarnessConfig>): HarnessConfig {
   return {

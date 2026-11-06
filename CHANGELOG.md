@@ -7,26 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Exported shell-free formatters to Cursor as an `afterFileEdit` hook, imported them back, and exported Claude `Bash` deny rules to `.cursor/cli.json`
-
-### Changed
-
-- **Breaking:** Copilot project MCP servers are read from `.github/mcp.json`; `.copilot/mcp-config.json` is no longer read
-- Allowed a Cursor hook that exits `0` with non-JSON output, and wrote that output to stderr instead of denying the call
-- Stopped writing a Cursor wrapper for a `Read` or `Write` `PreToolUse` hook that Cursor runs from
-  `.claude/settings.json`, and reported any `Read` hook as `lossy` because Cursor drops `offset`
-  and `limit`
-
-### Fixed
-
-- OpenCode `WebSearch` permissions were dropped or blocked; they are now written as the `websearch` key
-- Copilot reasons said `preToolUse` hooks cannot block and the CLI has no permission-request event; both reasons are corrected
-- Codex hook `timeout` was dropped on export; it is now carried, and unverified Codex claims are marked in the reason text
-
-## [0.3.0] - 2026-11-06
-
 ### Security
 
 - Reported a guardrail hook (`PreToolUse`, `PermissionRequest`, `UserPromptSubmit`) that a target
@@ -39,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Exported hooks to Cursor as `.cursor/hooks.json` through Node wrappers
+- Exported shell-free formatters to Cursor as an `afterFileEdit` hook, imported them back, and exported Claude `Bash` deny rules to `.cursor/cli.json`
 
 ### Changed
 
@@ -46,11 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.claude/hooks/harnessport-format.mjs`, and kept importing the earlier `$FILEPATH` form
 - Reported `PreToolUse` guardrails on OpenCode as `blocked` and exited `2`, instead of dropping them
   with a warning, because harnessport does not generate the OpenCode plugin that enforces them
+- **Breaking:** Copilot project MCP servers are read from `.github/mcp.json`; `.copilot/mcp-config.json` is no longer read
+- Allowed a Cursor hook that exits `0` with non-JSON output, and wrote that output to stderr instead of denying the call
+- Stopped writing a Cursor wrapper for a `Read` or `Write` `PreToolUse` hook that Cursor runs from
+  `.claude/settings.json`, and reported any `Read` hook as `lossy` because Cursor drops `offset`
+  and `limit`
 
 ### Fixed
 
 - Fixed an import stopping on one file with invalid YAML frontmatter; the file is reported as `blocked` and the rest of the import continues
 - Fixed the Cursor wrapper command for a home-directory target to use a quoted absolute path, so global hooks run from any project
+- OpenCode `WebSearch` permissions were dropped or blocked; they are now written as the `websearch` key
+- Copilot reasons said `preToolUse` hooks cannot block and the CLI has no permission-request event; both reasons are corrected
+- Codex hook `timeout` was dropped on export; it is now carried, and unverified Codex claims are marked in the reason text
 
 ### Removed
 

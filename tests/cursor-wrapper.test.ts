@@ -198,7 +198,7 @@ describe("Cursor hook export", () => {
     const sha = (dir: string, rel: string) => createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex");
     const dir = tmpDir();
     const { items } = cursorConverter.export(dir, configWith(guard({ command: "./guard.sh" })), {});
-    expect(sha(dir, WRAPPER)).toBe("dcdbe6a2572d8f7ac2db54f3db3b20d0b4663df442000d154a825775ea1f8ab7");
+    expect(sha(dir, WRAPPER)).toBe("b511e05abf278527511691ca9a582c47ace152a1282b276fae463b996c771241");
     expect(sha(dir, ".cursor/hooks.json")).toBe("954581d9f698edf7ee47bdfad1d167caf3b4df03596a669c1a48a852a73473c0");
     expect(items.find((i) => i.kind === "hook")?.status).toBe("exact");
 

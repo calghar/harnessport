@@ -22,7 +22,7 @@
 - [x] 2.1 `src/utils.ts`: add `uniqueSlugs(names)` returning one distinct slug per input, preserving
       order, disambiguating collisions deterministically.
 - [x] 2.2 `src/utils.ts`: `exportSkillsToDir` uses `uniqueSlugs`, emitting a `lossy` item per
-      disambiguation. This one site covers all six converters.
+      disambiguation. This one site covers all five converters.
 - [x] 2.3 `src/utils.ts`: `readFileIfExists` and `readJsonIfExists` distinguish `ENOENT` from parse
       and permission errors; the latter surface as `blocked` import items.
 - [x] 2.4 Regression test for 2.1–2.2: `Testing`/`testing` and `code review`/`code-review` each
@@ -36,11 +36,10 @@
       `isort`, `autopep8`, and `yapf` keep their own names instead of all becoming `ruff`, and
       `buildFormatterConfig` no longer collapses two formatters into one key.
 - [x] 3.3 `src/converters/cursor.ts`: same threading.
-- [x] 3.4 `src/converters/windsurf.ts`: same threading.
 - [x] 3.5 `src/converters/copilot.ts`: same threading. Then fix `exportRules` so rules lacking a
       `source` do not all collide onto `rule.instructions.md`.
 - [x] 3.6 `src/converters/codex.ts`: same threading.
-- [x] 3.7 Regression test across 3.1–3.6: for each of the six targets, converting into an empty
+- [x] 3.7 Regression test across 3.1–3.6: for each of the five targets, converting into an empty
       directory produces byte-identical output to `fidelity-core`.
 
 ## 4. CLI surface
@@ -66,7 +65,7 @@
       and the file holds the new content.
 - [x] 6.2 End-to-end: convert twice into the same directory; assert the second run exits 0 and
       reports nothing blocked, proving idempotence.
-- [x] 6.3 Diff emitted output against the `fidelity-core` build for all six targets into a clean
+- [x] 6.3 Diff emitted output against the `fidelity-core` build for all five targets into a clean
       directory; assert byte-identical.
 - [x] 6.4 Update `CHANGELOG.md` under `[Unreleased]` and `README.md` for `--force` and the new exit
       condition.

@@ -14,7 +14,7 @@ overwrites the first.
   to `<file>.bak`.
 - **MODIFIED / BREAKING** `writeIfNotDry` takes a `WriteContext` in place of the `dryRun` boolean and
   returns whether the path was written. The context carries `dryRun`, `force`, and the accumulated
-  conflict items. 22 call sites across `src/utils.ts` and all six converters.
+  conflict items. 22 call sites across `src/utils.ts` and all five converters.
 - **MODIFIED / BREAKING** `Converter.export` takes `options?: { dryRun?, force? }` in place of
   `dryRun?: boolean`.
 - **ADDED** `uniqueSlugs` in `src/utils.ts`, disambiguating output filenames that collide after
@@ -45,15 +45,15 @@ GATE 1 measured by grep, confirmed by reading each site. LSP is not used for cou
 it returned 2 references for `parseFrontmatter` where grep found 12.
 
 - `writeIfNotDry` — 22 call sites: `utils.ts:278,329,364`; `claude.ts:222,242,307,314`;
-  `opencode.ts:270,294,362`; `cursor.ts:119,136,156`; `windsurf.ts:96,125`;
+  `opencode.ts:270,294,362`; `cursor.ts:119,136,156`;
   `copilot.ts:160,176,199,220,241`; `codex.ts:83`.
 - **Invariant confirmed:** `fs.writeFileSync` appears exactly once in `src/`, at `utils.ts:209`
   inside `writeIfNotDry`. No converter writes directly, so conflict detection has a single
   enforcement point and cannot be bypassed.
 - `slugify` — 14 call sites; the ones that can collide into a single output path are
-  `utils.ts:271` (skills, shared by all six converters), `copilot.ts:167` (rule fallback name),
+  `utils.ts:271` (skills, shared by all five converters), `copilot.ts:167` (rule fallback name),
   and `opencode.ts:311` (`inferFormatterName`).
-- `Converter.export` — implemented by all six converters, called at `index.ts:95`.
+- `Converter.export` — implemented by all five converters, called at `index.ts:95`.
 
 Do-not-touch boundaries:
 

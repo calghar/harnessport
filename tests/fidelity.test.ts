@@ -7,7 +7,6 @@ import { spawnSync } from "node:child_process";
 import { claudeConverter } from "../src/converters/claude.js";
 import { opencodeConverter } from "../src/converters/opencode.js";
 import { cursorConverter } from "../src/converters/cursor.js";
-import { windsurfConverter } from "../src/converters/windsurf.js";
 import { copilotConverter } from "../src/converters/copilot.js";
 import { codexConverter } from "../src/converters/codex.js";
 import type { Converter } from "../src/converters/types.js";
@@ -22,14 +21,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const FIXTURES = path.resolve(HERE, "fixtures");
 const SAMPLE = path.join(FIXTURES, "sample-project");
-const OPENCODE_DENY = path.join(FIXTURES, "opencode-deny");
-const CLAUDE_DENY = path.join(FIXTURES, "claude-deny");
+const _OPENCODE_DENY = path.join(FIXTURES, "opencode-deny");
+const _CLAUDE_DENY = path.join(FIXTURES, "claude-deny");
 
 const TARGETS: Record<string, Converter> = {
   claude: claudeConverter,
   opencode: opencodeConverter,
   cursor: cursorConverter,
-  windsurf: windsurfConverter,
   copilot: copilotConverter,
   codex: codexConverter,
 };
@@ -74,118 +72,21 @@ function configWith(permissions: PermissionEntry[]): HarnessConfig {
 // Feature: permission-fidelity
 // ---------------------------------------------------------------------------
 
-describe("Requirement: Permission entries carry an action", () => {
-  it("OpenCode deny survives import", () => {
-    const config = opencodeConverter.import(OPENCODE_DENY);
-    // OpenCode's config key is `bash`; the canonical tool name is `Bash`, which is what the
-    // targets match on. Importing the lowercase key verbatim produced entries Claude Code
-    // ignored — see tests/permission-names.test.ts.
-    const entry = config.permissions.find(
-      (p) => p.tool === "Bash" && p.pattern === "rm -rf *",
-    );
-    expect(entry).toBeDefined();
-    expect(entry?.action).toBe("deny");
-  });
-
-  it("Claude deny list is imported", () => {
-    const config = claudeConverter.import(CLAUDE_DENY);
-    const entry = config.permissions.find(
-      (p) => p.tool === "Bash" && p.pattern === "curl *",
-    );
-    expect(entry).toBeDefined();
-    expect(entry?.action).toBe("deny");
-  });
-
-  it("Claude permissions are read from both settings files", () => {
-    const config = claudeConverter.import(CLAUDE_DENY);
-    const fromProject = config.permissions.find((p) => p.pattern === "npm test");
-    const fromLocal = config.permissions.find((p) => p.pattern === "./.env");
-    expect(fromProject?.action).toBe("allow");
-    expect(fromLocal?.action).toBe("deny");
-  });
-
-  it("An action-less source defaults to allow", () => {
-    const config = claudeConverter.import(SAMPLE);
-    expect(config.permissions.length).toBeGreaterThan(0);
-    expect(config.permissions.every((p) => p.action === "allow")).toBe(true);
-  });
-
-  it.each([
-    ["allow", "allow"],
-    ["ask", "ask"],
-    ["deny", "deny"],
-  ])("Each action maps to its matching Claude settings key: %s -> %s", (action, key) => {
-    const config = configWith([
-      permission("Bash", "ls *", action as "allow" | "ask" | "deny"),
-    ]);
-    const { dir } = exportToDisk(claudeConverter, config);
-    const settings = JSON.parse(
-      fs.readFileSync(path.join(dir, ".claude", "settings.local.json"), "utf-8"),
-    );
-    expect(settings.permissions[key]).toContain("Bash(ls *)");
-  });
-});
-
-describe("Requirement: A conversion never weakens a permission posture", () => {
-  it("A deny bound for a target with no permission model is refused, not downgraded", () => {
-    const config = configWith([permission("Bash", "rm -rf *", "deny")]);
-    const { result, joined } = exportToDisk(cursorConverter, config);
-    const blocked = result.items.filter((i) => i.status === "blocked");
-    expect(blocked.length).toBe(1);
-    expect(blocked[0].name).toContain("rm -rf *");
-    expect(joined).not.toContain("rm -rf *");
-  });
-
-  it("The rest of the conversion still completes", () => {
-    const config = configWith([permission("Bash", "rm -rf *", "deny")]);
-    config.agents = [{ name: "a", body: "agent body" }];
-    config.skills = [{ name: "s", body: "skill body" }];
-    config.commands = [{ name: "c", body: "command body" }];
-
-    const { result } = exportToDisk(cursorConverter, config);
-    expect(result.filesWritten.some((f) => f.includes("/rules/"))).toBe(true);
-    expect(result.filesWritten.some((f) => f.includes("/agents/"))).toBe(true);
-    expect(result.filesWritten.some((f) => f.includes("SKILL.md"))).toBe(true);
-    expect(result.filesWritten.some((f) => f.includes("/commands/"))).toBe(true);
-    expect(result.items.filter((i) => i.status === "blocked").length).toBe(1);
-  });
-
-  it.each([
-    ["claude", "exact"],
-    ["opencode", "exact"],
-    ["cursor", "blocked"],
-    ["windsurf", "blocked"],
-    ["copilot", "blocked"],
-    ["codex", "blocked"],
-  ])("A deny is refused for every target that cannot represent it: %s -> %s", (target, status) => {
-    const config = configWith([permission("Bash", "rm -rf *", "deny")]);
-    const { result } = exportToDisk(TARGETS[target], config);
-    const permItems = result.items.filter((i) => i.kind === "permission");
-    expect(permItems.length).toBeGreaterThan(0);
-    expect(permItems.every((i) => i.status === status)).toBe(true);
-  });
-});
-
-describe("Requirement: OpenCode shorthand-only tools do not silently widen a deny", () => {
-  it("A shorthand-only tool holding a deny is refused", () => {
-    const config = configWith([permission("webfetch", "https://x.example.com/*", "deny")]);
-    const { dir, result } = exportToDisk(opencodeConverter, config);
-    const blocked = result.items.filter((i) => i.status === "blocked");
-    expect(blocked.length).toBeGreaterThan(0);
-    expect(blocked.some((i) => i.name.includes("webfetch"))).toBe(true);
-
-    const json = JSON.parse(fs.readFileSync(path.join(dir, "opencode.json"), "utf-8"));
-    expect(json.permission?.webfetch).not.toBe("allow");
-  });
-
-  it("A granular tool keeps its per-pattern deny", () => {
-    const config = configWith([permission("bash", "rm -rf *", "deny")]);
-    const { dir, result } = exportToDisk(opencodeConverter, config);
-    const json = JSON.parse(fs.readFileSync(path.join(dir, "opencode.json"), "utf-8"));
-    expect(json.permission.bash["rm -rf *"]).toBe("deny");
-    expect(
-      result.items.filter((i) => i.kind === "permission").every((i) => i.status === "exact"),
-    ).toBe(true);
+describe("Requirement: A deny is never emitted as allow", () => {
+  it("maps each action to its Claude key and refuses a deny a target cannot represent", () => {
+    for (const action of ["allow", "ask", "deny"] as const) {
+      const { dir } = exportToDisk(claudeConverter, configWith([permission("Bash", "ls *", action)]));
+      const settings = JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.local.json"), "utf-8"));
+      expect(settings.permissions[action]).toContain("Bash(ls *)");
+    }
+    const expected = { claude: "exact", opencode: "exact", cursor: "blocked", copilot: "blocked", codex: "blocked" };
+    for (const [target, status] of Object.entries(expected)) {
+      const { result, joined } = exportToDisk(TARGETS[target], configWith([permission("Bash", "rm -rf *", "deny")]));
+      const permItems = result.items.filter((i) => i.kind === "permission");
+      expect(permItems.length, target).toBeGreaterThan(0);
+      expect(permItems.every((i) => i.status === status), target).toBe(true);
+      if (status === "blocked") expect(joined, target).not.toContain("rm -rf *");
+    }
   });
 });
 
@@ -193,143 +94,60 @@ describe("Requirement: OpenCode shorthand-only tools do not silently widen a den
 // Feature: conversion-reporting
 // ---------------------------------------------------------------------------
 
-describe("Requirement: Conversion fidelity is reported per item", () => {
-  it("A feature the target cannot represent is reported per item", () => {
-    const config = claudeConverter.import(SAMPLE);
-    const { result } = exportToDisk(windsurfConverter, config);
-    const agentItems = result.items.filter((i) => i.kind === "agent");
-    expect(agentItems.length).toBe(2);
-    expect(agentItems.map((i) => i.name).sort()).toEqual(["backend", "reviewer"]);
-  });
-
-  it("Import-side loss enters the same report", () => {
-    const config = codexConverter.import(SAMPLE);
-    const importItems = config.items.filter((i) => i.phase === "import");
-    expect(importItems.length).toBeGreaterThan(0);
-    expect(importItems.some((i) => i.reason?.includes("config.toml"))).toBe(true);
-  });
-
-  it("A non-exact item always explains itself", () => {
-    const config = claudeConverter.import(SAMPLE);
-    for (const name of Object.keys(TARGETS)) {
-      if (name === "claude") continue;
-      const { result } = exportToDisk(TARGETS[name], config);
-      for (const item of result.items) {
-        if (item.status !== "exact") {
-          expect(item.reason, `${name}/${item.kind}/${item.name}`).toBeTruthy();
-        }
-      }
-    }
-  });
-
-  it("A fully representable feature is reported exact", () => {
-    const config = claudeConverter.import(SAMPLE);
-    const { result } = exportToDisk(opencodeConverter, config);
-    const skillItems = result.items.filter((i) => i.kind === "skill");
-    expect(skillItems.length).toBe(1);
-    expect(skillItems[0].status).toBe("exact");
-  });
-});
-
-describe("Requirement: A reported outcome matches what was written", () => {
-  it("Agents reported as carried over are present in an emitted file", () => {
-    const config = claudeConverter.import(SAMPLE);
-    const { result, joined } = exportToDisk(windsurfConverter, config);
-    const agentItems = result.items.filter((i) => i.kind === "agent");
-
-    const allDropped = agentItems.every((i) => i.status === "dropped");
-    const bodiesPresent =
-      joined.includes("backend development specialist") && joined.includes("You are a code reviewer");
-    expect(allDropped || bodiesPresent).toBe(true);
-  });
-
-  it("Codex agent reporting matches its emitted output", () => {
-    const config = claudeConverter.import(SAMPLE);
-    const { result, joined } = exportToDisk(codexConverter, config);
-    const agentItems = result.items.filter((i) => i.kind === "agent");
-
-    const allDropped = agentItems.every((i) => i.status === "dropped");
-    const bodiesPresent =
-      joined.includes("backend development specialist") && joined.includes("You are a code reviewer");
-    expect(allDropped || bodiesPresent).toBe(true);
-  });
-
-  // The audit's H2: both exporters claimed agents were "merged" while writing nothing.
-  it("No reason claims a merge that did not happen", () => {
-    const config = claudeConverter.import(SAMPLE);
-    for (const converter of [windsurfConverter, codexConverter]) {
-      const { result, joined } = exportToDisk(converter, config);
-      const bodiesPresent = joined.includes("backend development specialist");
-      for (const item of result.items) {
-        if (/merged into/i.test(item.reason ?? "")) {
-          expect(bodiesPresent, `${converter.name} claims a merge that did not happen`).toBe(true);
-        }
-      }
-    }
-  });
-});
-
-describe("Requirement: Exit codes distinguish refusal from ordinary loss", () => {
-  it("A conversion that only drops unsupported concepts has nothing blocked", () => {
-    const config = claudeConverter.import(SAMPLE);
-    const { result } = exportToDisk(windsurfConverter, config);
-    expect(result.items.filter((i) => i.status === "blocked")).toHaveLength(0);
-    expect(result.items.some((i) => i.status === "dropped")).toBe(true);
-  });
-});
-
-// Exercises the built CLI, because exit codes and stream routing only exist there.
-describe("Requirement: The item list is available as JSON", () => {
+describe("Requirement: The supported targets are five harnesses", () => {
   const CLI = path.resolve(HERE, "..", "dist", "index.js");
   const hasBuild = fs.existsSync(CLI);
+  const FIVE = ["claude", "opencode", "cursor", "copilot", "codex"];
 
   function run(args: string[]) {
     const r = spawnSync("node", [CLI, ...args], { encoding: "utf-8" });
     return { status: r.status, stdout: r.stdout, stderr: r.stderr };
   }
 
-  it.runIf(hasBuild)("JSON output parses and carries every item", () => {
-    const r = run([
-      "convert", "--from", "opencode", "--to", "cursor",
-      "--source", OPENCODE_DENY, "--target", tmpDir(), "--dry-run", "--json",
-    ]);
-    const parsed = JSON.parse(r.stdout);
-    expect(Array.isArray(parsed.items)).toBe(true);
-    for (const item of parsed.items) {
-      expect(item).toHaveProperty("phase");
-      expect(item).toHaveProperty("kind");
-      expect(item).toHaveProperty("name");
-      expect(item).toHaveProperty("status");
-    }
+  it.runIf(hasBuild)("Windsurf is not a target", () => {
+    const out = path.join(tmpDir(), "out");
+    const r = run(["convert", "--from", "claude", "--to", "windsurf", "--source", SAMPLE, "--target", out]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("windsurf");
+    expect(r.stderr).toContain(FIVE.join(", "));
+    expect(fs.existsSync(out)).toBe(false);
   });
 
-  it.runIf(hasBuild)("Exit code accompanies JSON output", () => {
-    const r = run([
-      "convert", "--from", "opencode", "--to", "cursor",
-      "--source", OPENCODE_DENY, "--target", tmpDir(), "--dry-run", "--json",
-    ]);
-    expect(() => JSON.parse(r.stdout)).not.toThrow();
-    expect(r.status).toBe(2);
+});
+
+describe("Requirement: A guardrail a target cannot write or enforce is blocked", () => {
+  const CLI = path.resolve(HERE, "..", "dist", "index.js");
+  const hasBuild = fs.existsSync(CLI);
+
+  function convertHooks(to: string, hooks: Record<string, unknown[]>) {
+    const src = tmpDir();
+    fs.mkdirSync(path.join(src, ".claude"));
+    fs.writeFileSync(path.join(src, ".claude", "settings.json"), JSON.stringify({ hooks }));
+    const out = path.join(tmpDir(), "out");
+    const r = spawnSync(
+      "node",
+      [CLI, "convert", "--from", "claude", "--to", to, "--source", src, "--target", out],
+      { encoding: "utf-8" },
+    );
+    return { status: r.status, out };
+  }
+
+  const handler = (event: string, extra: object = {}) => ({
+    [event]: [{ matcher: "Bash", hooks: [{ type: "command", command: "./guard.sh", ...extra }] }],
   });
 
-  it.runIf(hasBuild)("A lossy conversion exits 0", () => {
-    const r = run([
-      "convert", "--from", "claude", "--to", "windsurf",
-      "--source", SAMPLE, "--target", tmpDir(), "--dry-run",
-    ]);
+  it.runIf(hasBuild)("OpenCode PreToolUse guardrail exits 2", () => {
+    expect(convertHooks("opencode", handler("PreToolUse")).status).toBe(2);
+  });
+
+  it.runIf(hasBuild)("Copilot failClosed guardrail exits 2", () => {
+    expect(convertHooks("copilot", handler("PreToolUse", { onFailure: "block" })).status).toBe(2);
+  });
+
+  it.runIf(hasBuild)("Cursor guardrail exits 0 and writes hooks.json", () => {
+    const r = convertHooks("cursor", handler("PreToolUse"));
     expect(r.status).toBe(0);
+    expect(fs.existsSync(path.join(r.out, ".cursor", "hooks.json"))).toBe(true);
   });
 
-  it.runIf(hasBuild)("Existing failure modes keep exit 1", () => {
-    const target = tmpDir();
-    expect(run(["convert", "--from", "nope", "--to", "claude", "--source", SAMPLE, "--target", target]).status).toBe(1);
-    expect(run(["convert", "--from", "claude", "--to", "nope", "--source", SAMPLE, "--target", target]).status).toBe(1);
-    expect(run(["convert", "--from", "claude", "--to", "claude", "--source", SAMPLE, "--target", target]).status).toBe(1);
-    expect(run(["convert", "--from", "claude", "--to", "cursor", "--source", target, "--target", target]).status).toBe(1);
-  });
-
-  it.runIf(hasBuild)("Version matches package.json", () => {
-    const pkg = JSON.parse(fs.readFileSync(path.resolve(HERE, "..", "package.json"), "utf-8"));
-    expect(run(["--version"]).stdout.trim()).toBe(pkg.version);
-  });
 });

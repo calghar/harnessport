@@ -4,6 +4,7 @@ dist/
 *.log
 .DS_Store
 coverage/
+tmp/
 
 # Test fixtures are inputs, not real settings. Many contributors globally ignore
 # **/.claude/settings.local.json, which silently drops these from commits and turns the

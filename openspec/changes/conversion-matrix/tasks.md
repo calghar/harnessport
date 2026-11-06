@@ -8,7 +8,7 @@
 ## 2. Fixtures (inputs before assertions)
 
 - [x] 2.1 Add a source fixture per harness: `opencode-project`, `cursor-project`,
-      `windsurf-project`, `copilot-project`, `codex-project`. Each holds rules and a skill, plus
+      `copilot-project`, `codex-project`. Each holds rules and a skill, plus
       whatever else that harness natively carries.
 - [x] 2.2 Assert each converter detects and imports its own fixture — at least one rule and one
       skill — so a fixture cannot silently rot.
@@ -41,7 +41,7 @@
 
 ## 5. The matrix
 
-- [x] 5.1 `tests/matrix.test.ts`: all 30 ordered pairs, exporting to a real temp directory —
+- [x] 5.1 `tests/matrix.test.ts`: all 20 ordered pairs, exporting to a real temp directory —
       assert the target's `detect` recognises the output.
 - [x] 5.2 Assert rule text and skill names survive every pair.
 - [x] 5.3 Assert re-running a conversion reports the same blocked set as the first run.

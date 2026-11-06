@@ -12,7 +12,7 @@ import type {
 } from "../schema.js";
 import type { WriteContext } from "../utils.js";
 import {
-  parseFrontmatter,
+  readMarkdownFile,
   serializeFrontmatter,
   readFileIfExists,
   getString,
@@ -23,6 +23,8 @@ import {
   importMcpFromJson,
   exportMcpToJson,
   exactItems,
+  GUARDRAIL_EVENTS,
+  hookStatus,
   permissionStatus,
   writeIfNotDry,
   uniqueSlugs,
@@ -55,8 +57,9 @@ function importRules(rootDir: string): Rule[] {
       (f) => f.endsWith(".instructions.md"),
     );
     for (const file of files) {
-      const raw = fs.readFileSync(path.join(instructionsDir, file), "utf-8");
-      const { data, content } = parseFrontmatter(raw);
+      const parsed = readMarkdownFile(path.join(instructionsDir, file), "rule");
+      if (!parsed) continue;
+      const { data, content } = parsed;
       rules.push({
         content,
         source: file,
@@ -78,45 +81,82 @@ function importRules(rootDir: string): Rule[] {
 function importAgents(rootDir: string): Agent[] {
   const agentsDir = path.join(rootDir, ".github", "agents");
   const files = listMdFiles(agentsDir).filter((f) => f.endsWith(".agent.md"));
-  return files.map((filePath) => {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const { data, content } = parseFrontmatter(raw);
+  return files.flatMap((filePath) => {
+    const parsed = readMarkdownFile(filePath, "agent");
+    if (!parsed) return [];
+    const { data, content } = parsed;
     const modelVal = data.model;
     let model: string | undefined;
     if (typeof modelVal === "string") model = modelVal;
     else if (Array.isArray(modelVal) && typeof modelVal[0] === "string") model = modelVal[0];
 
-    return {
+    return [{
       name: getStringOrFallback(data, "name", path.basename(filePath, ".agent.md")),
       description: getString(data, "description"),
       model,
       body: content,
       tools: getStringArray(data, "tools"),
-    };
+    }];
   });
 }
 
 function importCommands(rootDir: string): Command[] {
   const promptsDir = path.join(rootDir, ".github", "prompts");
-  return listMdFiles(promptsDir).map((filePath) => {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const { data, content } = parseFrontmatter(raw);
-    return {
+  return listMdFiles(promptsDir).flatMap((filePath) => {
+    const parsed = readMarkdownFile(filePath, "command");
+    if (!parsed) return [];
+    const { data, content } = parsed;
+    return [{
       name: path.basename(filePath, ".prompt.md"),
       description: getString(data, "description"),
       body: content,
       allowedTools: getStringArray(data, "tools"),
       agent: getString(data, "agent"),
-    };
+    }];
   });
 }
 
-function extractCommandFromHandler(handler: unknown): string | undefined {
+// Copilot camelCase hook keys and the Claude events they map to.
+const COPILOT_TO_CLAUDE: Record<string, string> = {
+  preToolUse: "PreToolUse",
+  postToolUse: "PostToolUse",
+  userPromptSubmitted: "UserPromptSubmit",
+  sessionStart: "SessionStart",
+  sessionEnd: "SessionEnd",
+  agentStop: "Stop",
+  preCompact: "PreCompact",
+  subagentStop: "SubagentStop",
+  errorOccurred: "errorOccurred",
+};
+const CLAUDE_TO_COPILOT = Object.fromEntries(
+  Object.entries(COPILOT_TO_CLAUDE).map(([camel, claude]) => [claude, camel]),
+);
+
+const POST_TOOL_USE_NAMES: Record<string, string> = {
+  Bash: "bash|powershell",
+  Edit: "edit|str_replace_editor|apply_patch",
+  Write: "create",
+  Read: "view",
+  Grep: "grep|rg",
+  Glob: "glob",
+  WebFetch: "web_fetch",
+};
+
+function extractHandler(
+  handler: unknown,
+): { command: string; matcher?: string; timeout?: number } | undefined {
   if (typeof handler !== "object" || handler === null) return undefined;
   const h = handler as Record<string, unknown>;
   const hookType = typeof h.type === "string" ? h.type : "command";
   if (hookType !== "command") return undefined;
-  return typeof h.bash === "string" ? h.bash : (typeof h.command === "string" ? h.command : undefined);
+  const command = typeof h.bash === "string" ? h.bash : (typeof h.command === "string" ? h.command : undefined);
+  if (command === undefined) return undefined;
+  const timeout = typeof h.timeoutSec === "number" ? h.timeoutSec : h.timeout;
+  return {
+    command,
+    ...(typeof h.matcher === "string" && { matcher: h.matcher }),
+    ...(typeof timeout === "number" && { timeout }),
+  };
 }
 
 function importHooks(rootDir: string): Hook[] {
@@ -131,12 +171,16 @@ function importHooks(rootDir: string): Hook[] {
   return files.flatMap((file) => {
     const raw = readJsonIfExists(path.join(hooksDir, file));
     if (!raw || typeof raw !== "object") return [];
-    return Object.entries(raw as Record<string, unknown>).flatMap(([event, handlers]) => {
+    const wrapped = (raw as { hooks?: unknown }).hooks;
+    const table = typeof wrapped === "object" && wrapped !== null && !Array.isArray(wrapped) ? wrapped : raw;
+    return Object.entries(table as Record<string, unknown>).flatMap(([key, handlers]) => {
       if (!Array.isArray(handlers)) return [];
-      return handlers
-        .map((h) => extractCommandFromHandler(h))
-        .filter((cmd): cmd is string => cmd !== undefined)
-        .map((cmd) => ({ event, command: cmd }));
+      const camel = Object.hasOwn(COPILOT_TO_CLAUDE, key);
+      const event = camel ? COPILOT_TO_CLAUDE[key] : key;
+      return handlers.flatMap((h) => {
+        const parsed = extractHandler(h);
+        return parsed ? [{ event, ...parsed, ...(camel && { dialect: "copilot" as const }) }] : [];
+      });
     });
   });
 }
@@ -230,23 +274,63 @@ function exportCommands(
   return files;
 }
 
+const PRE_TOOL_USE_LOSSY =
+  "Copilot reads top-level `permissionDecision`, not nested `hookSpecificOutput`, so a Claude JSON deny is not enforced, and exit 0 with no output counts as allow";
+
+/** The `{item, key, entry}` for one hook; `entry` is absent when the hook is not written. */
+function planHook(hook: Hook): { item: FidelityItem; key?: string; entry?: Record<string, unknown> } {
+  const claude = (hook.dialect ?? "claude") === "claude";
+  const refuse = (limitation: string) => ({ item: hookStatus(hook, "Copilot", limitation) });
+  const guardrail = GUARDRAIL_EVENTS.has(hook.event);
+
+  if (hook.args) return refuse("hooks hold one shell string in `bash`, so exec-form `args` cannot be written");
+  let matcher = hook.matcher === "*" || hook.matcher === "" ? undefined : hook.matcher;
+  let lossy: string | undefined;
+  if (claude) {
+    if (hook.event === "UserPromptSubmit") return refuse("drops the output of config-file `userPromptSubmitted` hooks");
+    if (hook.event === "PermissionRequest") return refuse("has no permission-request hook event");
+    if (hook.failClosed && guardrail) return refuse("cannot make a failing hook block the action");
+    if (hook.failClosed) lossy = "Copilot cannot make a failing hook block the action";
+    else if (hook.event === "PreToolUse") lossy = PRE_TOOL_USE_LOSSY;
+    if (hook.event === "PostToolUse" && matcher) {
+      const tokens = matcher.split("|");
+      const unknown = tokens.find((t) => !Object.hasOwn(POST_TOOL_USE_NAMES, t));
+      if (unknown) return refuse(`has no runtime name for the matcher token "${unknown}"`);
+      matcher = tokens.map((t) => POST_TOOL_USE_NAMES[t]).join("|");
+    }
+  }
+
+  const key = claude ? hook.event : (CLAUDE_TO_COPILOT[hook.event] ?? hook.event);
+  const entry = {
+    type: "command",
+    bash: hook.command,
+    ...(matcher && { matcher }),
+    ...(hook.timeout !== undefined && { timeoutSec: hook.timeout }),
+  };
+  const item: FidelityItem = lossy
+    ? { phase: "export", kind: "hook", name: hook.event, status: "lossy", reason: lossy }
+    : { phase: "export", kind: "hook", name: hook.event, status: "exact" };
+  return { item, key, entry };
+}
+
 function exportHooks(
   rootDir: string,
   hooks: Hook[],
   ctx: WriteContext,
-): string[] {
-  if (hooks.length === 0) return [];
-
-  // Group hooks by event
-  const grouped = hooks.reduce<Record<string, Array<{ type: string; bash: string }>>>((acc, hook) => {
-    if (!acc[hook.event]) acc[hook.event] = [];
-    acc[hook.event].push({ type: "command", bash: hook.command });
-    return acc;
-  }, {});
+): { files: string[]; items: FidelityItem[] } {
+  const plans = hooks.map(planHook);
+  const items = plans.map((p) => p.item);
+  const table: Record<string, Array<Record<string, unknown>>> = {};
+  for (const { key, entry } of plans) {
+    if (!key || !entry) continue;
+    table[key] ??= [];
+    table[key].push(entry);
+  }
+  if (Object.keys(table).length === 0) return { files: [], items };
 
   const filePath = path.join(rootDir, ".github", "hooks", "hooks.json");
-  if (!writeIfNotDry(filePath, `${JSON.stringify(grouped, null, 2)}\n`, ctx)) return [];
-  return [filePath];
+  const body = `${JSON.stringify({ version: 1, hooks: table }, null, 2)}\n`;
+  return { files: writeIfNotDry(filePath, body, ctx) ? [filePath] : [], items };
 }
 
 export const copilotConverter: Converter = {
@@ -298,6 +382,7 @@ export const copilotConverter: Converter = {
   ): ExportResult {
     const ctx = newWriteContext(options);
     const items: FidelityItem[] = [...config.items];
+    const hooksOut = exportHooks(rootDir, config.hooks, ctx);
     const filesWritten: string[] = [
       ...exportRules(rootDir, config, ctx),
       ...exportAgents(rootDir, config.agents, ctx),
@@ -312,7 +397,7 @@ export const copilotConverter: Converter = {
         config.mcpServers,
         ctx,
       ),
-      ...exportHooks(rootDir, config.hooks, ctx),
+      ...hooksOut.files,
     ];
 
     items.push(
@@ -321,7 +406,7 @@ export const copilotConverter: Converter = {
       ...exactItems("skill", config.skills.map((s) => s.name)),
       ...exactItems("command", config.commands.map((c) => c.name)),
       ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
-      ...exactItems("hook", config.hooks.map((h) => h.event)),
+      ...hooksOut.items,
       ...config.permissions.map((p) =>
         permissionStatus(p, copilotConverter.permissionActions, "Copilot"),
       ),

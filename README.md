@@ -9,16 +9,16 @@ against what that converter actually reports converting. Run `npm run docs:matri
 
 <!-- BEGIN:matrix -->
 
-| Feature     | Claude Code | OpenCode | Cursor | Windsurf   | Copilot | Codex CLI  |
-|-------------|:-----------:|:--------:|:------:|:----------:|:-------:|:----------:|
-| Rules       | yes         | yes      | yes    | yes        | yes     | yes        |
-| Agents      | yes         | yes      | yes    | -          | yes     | user-level |
-| Skills      | yes         | yes      | yes    | yes        | yes     | yes        |
-| Commands    | yes         | yes      | yes    | yes        | yes     | -          |
-| MCP Servers | yes         | yes      | yes    | user-level | yes     | user-level |
-| Permissions | yes         | yes      | -      | -          | -       | -          |
-| Hooks       | yes         | -        | -      | -          | yes     | yes        |
-| Formatters  | yes         | yes      | -      | -          | -       | -          |
+| Feature     | Claude Code | OpenCode | Cursor | Copilot | Codex CLI  |
+|-------------|:-----------:|:--------:|:------:|:-------:|:----------:|
+| Rules       | yes         | yes      | yes    | yes     | yes        |
+| Agents      | yes         | yes      | yes    | yes     | user-level |
+| Skills      | yes         | yes      | yes    | yes     | yes        |
+| Commands    | yes         | yes      | yes    | yes     | -          |
+| MCP Servers | yes         | yes      | yes    | yes     | user-level |
+| Permissions | yes         | yes      | -      | -       | -          |
+| Hooks       | yes         | -        | yes    | yes     | yes        |
+| Formatters  | yes         | yes      | -      | -       | -          |
 
 - **yes** — imported and exported
 - **user-level** — the harness stores this outside your repository, in a file harnessport does not read or write
@@ -56,7 +56,7 @@ harnessport convert --from claude --to opencode --source ./my-project
 harnessport convert --from claude --to cursor --source ./my-project --dry-run
 
 # Write output to a different directory
-harnessport convert --from claude --to windsurf --source ./project --target ./output
+harnessport convert --from claude --to codex --source ./project --target ./output
 
 # Machine-readable fidelity report on stdout
 harnessport convert --from claude --to cursor --source ./project --json
@@ -93,7 +93,7 @@ alwaysApply: false                 - src/**/*.ts
 ---                              ---
 ```
 
-Cursor's `globs:`, Windsurf's `globs:`, Copilot's `applyTo:`, and Claude Code's `paths:` all map
+Cursor's `globs:`, Copilot's `applyTo:`, and Claude Code's `paths:` all map
 to the same canonical field, so `cursor → claude → cursor` returns what you started with.
 
 ### Fidelity reporting
@@ -119,6 +119,12 @@ Fidelity: 1 exact, 0 lossy, 1 dropped, 2 blocked
 the target harness has no way to express it, the entry is refused and reported rather than
 downgraded — there is no flag that overrides this. The rest of the conversion still completes, so
 you get your files plus an accurate account of what did not carry.
+
+**Hook fidelity.** A guardrail is a hook on `PreToolUse`, `PermissionRequest` or `UserPromptSubmit`.
+A target that cannot write or enforce a guardrail reports it `blocked`, and `convert` exits `2`.
+Any other hook it cannot write is `dropped`, and the exit code is unchanged. Cursor runs hooks
+through Node wrappers. The command runs twice when `.claude/settings.json` also holds it and
+Cursor's Third-Party Imports is on.
 
 ### Check the report rather than trusting it
 
@@ -206,15 +212,15 @@ reason rather than disappearing. See [Fidelity reporting](#fidelity-reporting).
 
 ### File Locations by Tool
 
-| Feature  | Claude Code | OpenCode | Cursor | Windsurf | Copilot | Codex CLI |
-|----------|-------------|----------|--------|----------|---------|-----------|
-| Rules | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` | `AGENTS.md` | `.cursor/rules/*.mdc` | `.windsurf/rules/*.md` | `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md` | `AGENTS.md` |
-| File-scoped rules | `.claude/rules/*.md` (`paths:`) | - | `.cursor/rules/*.mdc` (`globs:`) | `.windsurf/rules/*.md` (`globs:`) | `.github/instructions/*.instructions.md` (`applyTo:`) | - |
-| Agents | `.claude/agents/*.md` | `.opencode/agents/*.md` | `.cursor/agents/*.md` | `AGENTS.md` (partial) | `.github/agents/*.agent.md` | `~/.codex/config.toml` |
-| Skills | `.claude/skills/*/SKILL.md` | `.opencode/skills/*/SKILL.md` | `.cursor/skills/*/SKILL.md` | `.windsurf/skills/*/SKILL.md` | `.github/skills/*/SKILL.md` | `.codex/skills/*/SKILL.md` |
-| Commands | `.claude/commands/*.md` | `.opencode/commands/*.md` | `.cursor/commands/*.md` | `.windsurf/workflows/*.md` | `.github/prompts/*.prompt.md` | - |
-| MCP | `.mcp.json` | `opencode.json` | `.cursor/mcp.json` | `~/.codeium/windsurf/mcp_config.json` | `.copilot/mcp-config.json` | `~/.codex/config.toml` |
-| Hooks | `.claude/settings.json` | - | - | - | `.github/hooks/*.json` | `.codex/hooks.json` |
+| Feature  | Claude Code | OpenCode | Cursor | Copilot | Codex CLI |
+|----------|-------------|----------|--------|---------|-----------|
+| Rules | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` | `AGENTS.md` | `.cursor/rules/*.mdc` | `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md` | `AGENTS.md` |
+| File-scoped rules | `.claude/rules/*.md` (`paths:`) | - | `.cursor/rules/*.mdc` (`globs:`) | `.github/instructions/*.instructions.md` (`applyTo:`) | - |
+| Agents | `.claude/agents/*.md` | `.opencode/agents/*.md` | `.cursor/agents/*.md` | `.github/agents/*.agent.md` | `~/.codex/config.toml` |
+| Skills | `.claude/skills/*/SKILL.md` | `.opencode/skills/*/SKILL.md` | `.cursor/skills/*/SKILL.md` | `.github/skills/*/SKILL.md` | `.codex/skills/*/SKILL.md` |
+| Commands | `.claude/commands/*.md` | `.opencode/commands/*.md` | `.cursor/commands/*.md` | `.github/prompts/*.prompt.md` | - |
+| MCP | `.mcp.json` | `opencode.json` | `.cursor/mcp.json` | `.copilot/mcp-config.json` | `~/.codex/config.toml` |
+| Hooks | `.claude/settings.json` | - | `.cursor/hooks.json` (Node wrappers) | `.github/hooks/*.json` (`version: 1`) | `.codex/hooks.json` |
 
 ## Architecture
 
@@ -230,7 +236,6 @@ src/
     claude.ts            # Claude Code
     opencode.ts          # OpenCode
     cursor.ts            # Cursor
-    windsurf.ts          # Windsurf
     copilot.ts           # GitHub Copilot
     codex.ts             # Codex CLI
 scripts/

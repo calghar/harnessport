@@ -50,10 +50,10 @@ earlier in this work, so grep is the ground truth here — 12 references to a sy
 returned 2).
 
 **Adding a required field to `Converter` breaks every implementer at compile time**, which is the
-desired failure: all six must declare. Affected:
+desired failure: all five must declare. Affected:
 
 - `src/converters/types.ts` — the interface.
-- `src/converters/claude.ts:407`, `opencode.ts:486`, `cursor.ts:163`, `windsurf.ts:135`,
+- `src/converters/claude.ts:407`, `opencode.ts:486`, `cursor.ts:163`,
   `copilot.ts:252`, `codex.ts:92` — each `export const <name>Converter: Converter = {` object gains
   `capabilities`.
 - `src/index.ts:16` (`Record<string, Converter>`) and `:201-239` (the `list` action).
@@ -70,7 +70,7 @@ desired failure: all six must declare. Affected:
   the single exception named above, where the OpenCode exporter's hook item claimed `lossy` for
   something it does not write.
 - Emitted files, frontmatter shape, file naming, and directory layout are untouched. The
-  `safe-writes` byte-identical guarantee must still hold for all six targets.
+  `safe-writes` byte-identical guarantee must still hold for all five targets.
 - `permissionActions` stays as the enforcement input for `permissionStatus`. `capabilities` is
   documentation of what converts and must never be consulted to decide whether a permission may
   be written; that decision stays in `permissionStatus`, which is the single never-weaken

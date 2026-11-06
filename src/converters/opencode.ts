@@ -14,7 +14,7 @@ import type {
 } from "../schema.js";
 import type { WriteContext } from "../utils.js";
 import {
-  parseFrontmatter,
+  readMarkdownFile,
   serializeFrontmatter,
   readFileIfExists,
   readJsonAs,
@@ -26,6 +26,7 @@ import {
   getStringRecord,
   importSkillsFromDir,
   exportSkillsToDir,
+  hookStatus,
   exportRulesToFile,
   writeIfNotDry,
   uniqueSlugs,
@@ -90,9 +91,10 @@ function importRules(rootDir: string): HarnessConfig["rules"] {
 
 function importAgents(rootDir: string): Agent[] {
   const agentsDir = path.join(rootDir, ".opencode", "agents");
-  return listMdFiles(agentsDir).map((filePath) => {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const { data, content } = parseFrontmatter(raw);
+  return listMdFiles(agentsDir).flatMap((filePath) => {
+    const parsed = readMarkdownFile(filePath, "agent");
+    if (!parsed) return [];
+    const { data, content } = parsed;
     const perm = getRecord(data, "permission");
     const tools = perm
       ? Object.keys(perm).filter((k) => k !== "edit")
@@ -100,7 +102,7 @@ function importAgents(rootDir: string): Agent[] {
     const rawMode = getString(data, "mode");
     const mode = rawMode === "primary" || rawMode === "subagent" ? rawMode : undefined;
 
-    return {
+    return [{
       name: path.basename(filePath, ".md"),
       description: getString(data, "description"),
       model: getString(data, "model"),
@@ -109,21 +111,22 @@ function importAgents(rootDir: string): Agent[] {
       temperature: getNumber(data, "temperature"),
       permissions: perm as Record<string, string | Record<string, string>> | undefined,
       tools,
-    };
+    }];
   });
 }
 
 function importCommands(rootDir: string): Command[] {
   const commandsDir = path.join(rootDir, ".opencode", "commands");
-  return listMdFiles(commandsDir).map((filePath) => {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const { data, content } = parseFrontmatter(raw);
-    return {
+  return listMdFiles(commandsDir).flatMap((filePath) => {
+    const parsed = readMarkdownFile(filePath, "command");
+    if (!parsed) return [];
+    const { data, content } = parsed;
+    return [{
       name: path.basename(filePath, ".md"),
       description: getString(data, "description"),
       body: content,
       agent: getString(data, "agent"),
-    };
+    }];
   });
 }
 
@@ -609,17 +612,13 @@ export const opencodeConverter: Converter = {
     );
 
     for (const hook of config.hooks) {
-      items.push({
-        phase: "export",
-        kind: "hook",
-        name: hook.event,
-        // Nothing is written for a hook, so this is `dropped`, not `lossy`. `lossy` means the
-        // content reached the target with a field removed; the distinction is what lets a reader
-        // tell "in the file, minus a detail" from "not in the file at all".
-        status: "dropped",
-        reason:
-          "OpenCode supports only formatters (PostToolUse on Edit/Write); this hook was dropped",
-      });
+      items.push(
+        hookStatus(
+          hook,
+          "OpenCode",
+          "supports only formatters (PostToolUse on Edit/Write); enforcing a guardrail needs a plugin on tool.execute.before, which harnessport does not generate",
+        ),
+      );
     }
 
     for (const cmd of config.commands) {

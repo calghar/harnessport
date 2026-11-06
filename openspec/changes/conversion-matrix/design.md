@@ -19,7 +19,7 @@ Constraints:
 
 **Goals:**
 
-- All 30 ordered pairs exercised against real files, with assertions that can fail.
+- All 20 ordered pairs exercised against real files, with assertions that can fail.
 - The five untested importers covered by a fixture each.
 - Every loss on every pair accounted for by a fidelity item — the property the whole positioning
   rests on, asserted rather than asserted-about.
@@ -28,7 +28,7 @@ Constraints:
 **Non-Goals:**
 
 - Byte-exact expected-output fixtures. They pin formatting rather than meaning and turn every
-  cosmetic change into 30 test edits. The assertions are semantic: detected, present, accounted
+  cosmetic change into 20 test edits. The assertions are semantic: detected, present, accounted
   for.
 - Fixing the *cause* of every accounted-for loss. A loss that is correctly reported is working as
   designed; only losses reported as `exact` are defects here.
@@ -95,7 +95,6 @@ inference list gains an entry, the classification follows automatically.
 | claude | Yes, from an OpenCode source only | `.claude/settings.local.json` carries `Bash(git push *)` where it carried `bash(git push *)`. The old form matched no Claude Code tool. No other file differs; the formatter fix changes a reported status, not the emitted hook. |
 | opencode | No | `websearch` was already absent from the emitted config — only the reported status changes. `buildPermissionConfig` lowercases, so canonical input produces the same keys as before. |
 | cursor | No | Not modified. |
-| windsurf | No | Not modified. |
 | copilot | No | Not modified. |
 | codex | No | Not modified. |
 
@@ -112,7 +111,7 @@ inference list gains an entry, the classification follows automatically.
   defined in an ESM package and works only because vitest transpiles it. Replaced with
   `fileURLToPath(import.meta.url)`, which also works on Node 18 — `import.meta.dirname` does not,
   and CI runs 18.
-- [30 pairs × several assertions is slow] → Measured: the probe over all 30 pairs with real
+- [20 pairs × several assertions is slow] → Measured: the probe over all 20 pairs with real
   directory writes runs in well under a second. Vitest's existing suite is ~1s total.
 
 ## Migration Plan

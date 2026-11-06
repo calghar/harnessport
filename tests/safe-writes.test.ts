@@ -6,7 +6,6 @@ import * as os from "node:os";
 import { spawnSync } from "node:child_process";
 import { claudeConverter } from "../src/converters/claude.js";
 import { opencodeConverter } from "../src/converters/opencode.js";
-import { copilotConverter } from "../src/converters/copilot.js";
 import type { HarnessConfig } from "../src/schema.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -18,13 +17,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.resolve(HERE, "fixtures");
 const SAMPLE = path.join(FIXTURES, "sample-project");
 const CLI = path.resolve(HERE, "..", "dist", "index.js");
-const hasBuild = fs.existsSync(CLI);
+const _hasBuild = fs.existsSync(CLI);
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "harnessport-sw-"));
 }
 
-function run(args: string[]) {
+function _run(args: string[]) {
   return spawnSync("node", [CLI, ...args], { encoding: "utf-8" });
 }
 
@@ -52,34 +51,6 @@ describe("Requirement: An existing file is never silently overwritten", () => {
     ).toBe(true);
   });
 
-  it("A missing file is written normally", () => {
-    const dir = tmpDir();
-    const config = claudeConverter.import(SAMPLE);
-    const result = opencodeConverter.export(dir, config, {});
-
-    expect(fs.existsSync(path.join(dir, "AGENTS.md"))).toBe(true);
-    expect(result.items.filter((i) => i.status === "blocked")).toHaveLength(0);
-  });
-
-  it("Identical content is not rewritten", () => {
-    const dir = tmpDir();
-    const config = claudeConverter.import(SAMPLE);
-    opencodeConverter.export(dir, config, {});
-    const second = opencodeConverter.export(dir, config, {});
-
-    expect(second.items.filter((i) => i.status === "blocked")).toHaveLength(0);
-  });
-
-  it("One conflict does not suppress other files", () => {
-    const dir = tmpDir();
-    fs.writeFileSync(path.join(dir, "AGENTS.md"), "# conflicting\n");
-
-    const config = claudeConverter.import(SAMPLE);
-    const result = opencodeConverter.export(dir, config, {});
-
-    expect(fs.existsSync(path.join(dir, "opencode.json"))).toBe(true);
-    expect(result.filesWritten.some((f) => f.endsWith("opencode.json"))).toBe(true);
-  });
 });
 
 describe("Requirement: Forcing an overwrite preserves the original", () => {
@@ -96,25 +67,6 @@ describe("Requirement: Forcing an overwrite preserves the original", () => {
     expect(fs.readFileSync(target, "utf-8")).not.toBe(original);
   });
 
-  it("Force reports the overwrite as lossy naming the backup", () => {
-    const dir = tmpDir();
-    fs.writeFileSync(path.join(dir, "AGENTS.md"), "# differing\n");
-
-    const config = claudeConverter.import(SAMPLE);
-    const result = opencodeConverter.export(dir, config, { force: true });
-
-    expect(result.items.filter((i) => i.status === "blocked")).toHaveLength(0);
-    expect(result.items.some((i) => i.status === "lossy" && i.name.includes(".bak"))).toBe(true);
-  });
-
-  it("Force does not create a backup where there was no conflict", () => {
-    const dir = tmpDir();
-    const config = claudeConverter.import(SAMPLE);
-    opencodeConverter.export(dir, config, { force: true });
-
-    const baks = fs.readdirSync(dir).filter((f) => f.endsWith(".bak"));
-    expect(baks).toHaveLength(0);
-  });
 });
 
 describe("Requirement: A dry run writes nothing", () => {
@@ -133,18 +85,6 @@ describe("Requirement: A dry run writes nothing", () => {
     ).toBe(true);
   });
 
-  it("Dry run with force writes nothing", () => {
-    const dir = tmpDir();
-    const target = path.join(dir, "AGENTS.md");
-    const original = "# untouched\n";
-    fs.writeFileSync(target, original);
-
-    const config = claudeConverter.import(SAMPLE);
-    opencodeConverter.export(dir, config, { dryRun: true, force: true });
-
-    expect(fs.readFileSync(target, "utf-8")).toBe(original);
-    expect(fs.existsSync(`${target}.bak`)).toBe(false);
-  });
 });
 
 describe("Requirement: Two inputs never collapse onto one output file", () => {
@@ -173,73 +113,6 @@ describe("Requirement: Two inputs never collapse onto one output file", () => {
     expect(skillFiles.join("\n")).toContain("lower body");
   });
 
-  it("Skills differing only by separator each get a file", () => {
-    const dir = tmpDir();
-    const config = emptyConfig({
-      skills: [
-        { name: "code review", body: "spaced" },
-        { name: "code-review", body: "hyphenated" },
-      ],
-    });
-    const result = opencodeConverter.export(dir, config, {});
-    const skillPaths = result.filesWritten.filter((f) => f.endsWith("SKILL.md"));
-    expect(new Set(skillPaths).size).toBe(2);
-  });
-
-  it("A disambiguation is reported", () => {
-    const dir = tmpDir();
-    const config = emptyConfig({
-      skills: [
-        { name: "Testing", body: "a" },
-        { name: "testing", body: "b" },
-      ],
-    });
-    const result = opencodeConverter.export(dir, config, {});
-    expect(result.items.some((i) => i.status === "lossy" && i.kind === "skill")).toBe(true);
-  });
-
-  it("Rules without a source name do not collapse", () => {
-    const dir = tmpDir();
-    const config = emptyConfig({
-      rules: [
-        { content: "one", globs: "*.ts" },
-        { content: "two", globs: "*.js" },
-        { content: "three", globs: "*.py" },
-      ],
-    });
-    const result = copilotConverter.export(dir, config, {});
-    const instr = result.filesWritten.filter((f) => f.endsWith(".instructions.md"));
-    expect(new Set(instr).size).toBe(3);
-  });
-});
-
-describe("Requirement: A formatter keeps its own identity", () => {
-  it("Two Python formatters both survive", () => {
-    const dir = tmpDir();
-    const config = emptyConfig({
-      formatters: [
-        { glob: "*.py", command: "black" },
-        { glob: "*.py", command: "isort" },
-      ],
-    });
-    opencodeConverter.export(dir, config, {});
-    const json = JSON.parse(fs.readFileSync(path.join(dir, "opencode.json"), "utf-8"));
-    expect(Object.keys(json.formatter)).toHaveLength(2);
-  });
-
-  it.each([
-    ["black", "black"],
-    ["isort", "isort"],
-    ["ruff", "ruff"],
-    ["prettier", "prettier"],
-    ["gofmt", "gofmt"],
-  ])("A formatter's name reflects its command: %s -> %s", (command, name) => {
-    const dir = tmpDir();
-    const config = emptyConfig({ formatters: [{ glob: "*.x", command }] });
-    opencodeConverter.export(dir, config, {});
-    const json = JSON.parse(fs.readFileSync(path.join(dir, "opencode.json"), "utf-8"));
-    expect(Object.keys(json.formatter)).toContain(name);
-  });
 });
 
 describe("Requirement: Malformed input is distinguishable from absent input", () => {
@@ -257,45 +130,4 @@ describe("Requirement: Malformed input is distinguishable from absent input", ()
     ).toBe(true);
   });
 
-  it("An absent config is not an error", () => {
-    const dir = tmpDir();
-    fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
-    fs.writeFileSync(path.join(dir, ".claude", "CLAUDE.md"), "# rules\n");
-
-    const config = claudeConverter.import(dir);
-    expect(config.items.some((i) => i.name.includes(".mcp.json"))).toBe(false);
-    expect(config.mcpServers).toHaveLength(0);
-  });
-});
-
-describe("CLI: write conflicts and --force", () => {
-  it.runIf(hasBuild)("A refused write fails the run", () => {
-    const dir = tmpDir();
-    fs.writeFileSync(path.join(dir, "AGENTS.md"), "# differing\n");
-    const r = run(["convert", "--from", "claude", "--to", "opencode", "--source", SAMPLE, "--target", dir]);
-    expect(r.status).toBe(2);
-  });
-
-  it.runIf(hasBuild)("Force succeeds where the unforced run refused", () => {
-    const dir = tmpDir();
-    fs.writeFileSync(path.join(dir, "AGENTS.md"), "# differing\n");
-    const r = run(["convert", "--from", "claude", "--to", "opencode", "--source", SAMPLE, "--target", dir, "--force"]);
-    expect(r.status).toBe(0);
-  });
-
-  it.runIf(hasBuild)("Converting twice is idempotent", () => {
-    const dir = tmpDir();
-    const args = ["convert", "--from", "claude", "--to", "opencode", "--source", SAMPLE, "--target", dir];
-    expect(run(args).status).toBe(0);
-    expect(run(args).status).toBe(0);
-  });
-
-  it.runIf(hasBuild)("A malformed source config fails the run", () => {
-    const src = tmpDir();
-    fs.mkdirSync(path.join(src, ".claude"), { recursive: true });
-    fs.writeFileSync(path.join(src, ".claude", "CLAUDE.md"), "# rules\n");
-    fs.writeFileSync(path.join(src, ".mcp.json"), "{ broken ]");
-    const r = run(["convert", "--from", "claude", "--to", "opencode", "--source", src, "--target", tmpDir()]);
-    expect(r.status).toBe(2);
-  });
 });

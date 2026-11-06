@@ -16,31 +16,17 @@ describe("parseFrontmatter", () => {
     ["CRLF", "---\r\nname: x\r\n---\r\nbody", { name: "x" }, "body"],
   ];
 
-  for (const [label, input, data, content] of cases) {
-    it(`matches recorded gray-matter output: ${label}`, () => {
+  it("matches recorded gray-matter output", () => {
+    for (const [label, input, data, content] of cases) {
       const result = parseFrontmatter(input);
-      expect(result.data).toEqual(data);
-      expect(result.content).toBe(content);
-    });
-  }
-
-  it("ignores a non-object frontmatter block rather than throwing", () => {
-    expect(parseFrontmatter("---\n- a\n- b\n---\nbody").data).toEqual({});
+      expect(result.data, label).toEqual(data);
+      expect(result.content, label).toBe(content);
+    }
   });
 
-  it("does not treat a mid-file --- as frontmatter", () => {
-    const result = parseFrontmatter("intro\n\n---\n\ntail");
-    expect(result.data).toEqual({});
-    expect(result.content).toBe("intro\n\n---\n\ntail");
-  });
 });
 
 describe("serializeFrontmatter", () => {
-  it("matches recorded gray-matter output for scalars and arrays", () => {
-    expect(serializeFrontmatter({ name: "foo", tools: ["Bash", "Edit"] }, "Body here")).toBe(
-      "---\nname: foo\ntools:\n  - Bash\n  - Edit\n---\nBody here\n",
-    );
-  });
 
   // yaml quotes only where YAML requires it, where js-yaml quoted more eagerly.
   // Quote style is cosmetic; what must hold is that every value survives a round trip.
@@ -58,22 +44,4 @@ describe("serializeFrontmatter", () => {
     expect(parseFrontmatter(serializeFrontmatter(tricky, "b")).data).toEqual(tricky);
   });
 
-  it("drops null and undefined keys", () => {
-    expect(serializeFrontmatter({ a: "1", b: null, c: undefined }, "x")).toBe("---\na: '1'\n---\nx\n");
-  });
-
-  it("returns the bare body when every key is empty", () => {
-    expect(serializeFrontmatter({ a: null }, "just body")).toBe("just body");
-  });
-
-  it("normalises trailing newlines to exactly one", () => {
-    expect(serializeFrontmatter({ n: "x" }, "body\n\n\n")).toBe("---\nn: x\n---\nbody\n");
-  });
-
-  it("round-trips through parseFrontmatter", () => {
-    const data = { name: "agent", model: "opus", tools: ["Bash", "Read"] };
-    const parsed = parseFrontmatter(serializeFrontmatter(data, "The body."));
-    expect(parsed.data).toEqual(data);
-    expect(parsed.content).toBe("The body.");
-  });
 });

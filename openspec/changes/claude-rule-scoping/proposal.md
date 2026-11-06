@@ -40,8 +40,7 @@ discarding the scoping.
 GATE 1 measured by grep, confirmed by reading each site.
 
 **The blast radius is one converter.** `Rule.globs` already round-trips correctly through the
-other five: cursor imports at `:52` and exports at `:117`; windsurf imports at `:46` and exports at
-`:95`; copilot imports `applyTo` at `:63` and exports it at `:183`. opencode and codex write
+other four: cursor imports at `:52` and exports at `:117`; copilot imports `applyTo` at `:63` and exports it at `:183`. opencode and codex write
 `AGENTS.md`, which has no scoping concept, and are unaffected. `claude.ts` is the only converter
 that reads a glob into the canonical schema and then drops it on the way out.
 

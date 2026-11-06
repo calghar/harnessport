@@ -12,7 +12,7 @@ converted exactly, what converted with detail dropped, and what did not convert 
 - **ADDED** `FidelityItem` — `{ phase, kind, name, status, reason? }` where `status` is
   `exact | lossy | blocked` — as the single representation of conversion fidelity.
 - **MODIFIED / BREAKING** `ExportResult` (`src/converters/types.ts`) drops `warnings: string[]` in
-  favour of `items: FidelityItem[]`. All six converters return items.
+  favour of `items: FidelityItem[]`. All five converters return items.
 - **MODIFIED / BREAKING** `HarnessConfig` (`src/schema.ts`) drops `warnings: string[]` in favour of
   `items: FidelityItem[]`, so import-side loss enters the same report. Today only
   `src/converters/codex.ts:94` populates it.
@@ -22,7 +22,7 @@ converted exactly, what converted with detail dropped, and what did not convert 
 - **MODIFIED** `src/converters/opencode.ts` preserves the action value when importing OpenCode's
   `permission` block. `parsePermissions` currently discards it via `Object.keys`.
 - **MODIFIED / BREAKING** `src/utils.ts` `generateDropWarnings` returns `FidelityItem[]` instead of
-  `string[]`, and is renamed `generateDropItems`. Four callers: cursor, windsurf, copilot, codex.
+  `string[]`, and is renamed `generateDropItems`. Three callers: cursor, copilot, codex.
 - **ADDED / BREAKING** A permission whose `action` is `deny` or `ask` and whose target cannot
   represent it is emitted as a `blocked` item and **is not written in a weakened form**. There is no
   flag that downgrades it.
@@ -54,13 +54,13 @@ on this repo and its counts are not used here.
 Union of affected files is **all 10 source files** — the entire `src/` tree. This is expected for a
 canonical-schema change and is surfaced rather than absorbed silently.
 
-- `ExportResult` — constructed and returned by all six converters (`claude.ts:378`,
-  `opencode.ts:494`, `cursor.ts:209`, `windsurf.ts:179`, `copilot.ts:306`, `codex.ts:141`), defined
+- `ExportResult` — constructed and returned by all five converters (`claude.ts:378`,
+  `opencode.ts:494`, `cursor.ts:209`, `copilot.ts:306`, `codex.ts:141`), defined
   at `types.ts:13`, consumed at `index.ts:97-111`.
 - `config.permissions` — produced by `claude.ts:328` and `opencode.ts` (`importMcpAndConfig`);
-  hardcoded `[]` by the cursor, windsurf, copilot, and codex importers; read at `claude.ts:257,284`,
+  hardcoded `[]` by the cursor, copilot, and codex importers; read at `claude.ts:257,284`,
   `opencode.ts:331,481`, `utils.ts:389`, `index.ts:88`.
-- `generateDropWarnings` — defined `utils.ts:365`; four callers (`cursor.ts:204`, `windsurf.ts:172`,
+- `generateDropWarnings` — defined `utils.ts:365`; three callers (`cursor.ts:204`,
   `copilot.ts:295`, `codex.ts:130`). Not called by claude or opencode, which is why their loss goes
   unreported today.
 - `HarnessConfig.warnings` — every importer sets it, every exporter spreads it via
@@ -84,7 +84,7 @@ change widens what is read, so no existing input becomes invalid.
 
 **Security posture.** This change exists to stop a conversion weakening a posture. A `deny` is
 never emitted as an `allow`; where a target cannot represent it, the item is refused and reported,
-and the run exits 2. Because four of the six targets (cursor, windsurf, copilot, codex) have no
+and the run exits 2. Because three of the five targets (cursor, copilot, codex) have no
 permission concept at all, blocking is scoped to the individual item so the rest of the conversion
 still completes — otherwise those targets would be permanently unreachable for any user holding a
 single deny rule.

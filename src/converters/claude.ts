@@ -14,7 +14,7 @@ import type {
 } from "../schema.js";
 import type { WriteContext } from "../utils.js";
 import {
-  parseFrontmatter,
+  readMarkdownFile,
   serializeFrontmatter,
   readFileIfExists,
   readJsonAs,
@@ -35,6 +35,7 @@ import {
   newWriteContext,
   slugify,
   exactItems,
+  hookStatus,
   permissionStatus,
 } from "../utils.js";
 
@@ -69,14 +70,15 @@ function listMdFilesRecursive(dirPath: string): string[] {
  */
 function importScopedRules(rootDir: string): HarnessConfig["rules"] {
   const rulesDir = path.join(rootDir, ".claude", "rules");
-  return listMdFilesRecursive(rulesDir).map((filePath) => {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const { data, content } = parseFrontmatter(raw);
-    return {
+  return listMdFilesRecursive(rulesDir).flatMap((filePath) => {
+    const parsed = readMarkdownFile(filePath, "rule");
+    if (!parsed) return [];
+    const { data, content } = parsed;
+    return [{
       content,
       source: path.basename(filePath),
       globs: getGlobs(data, "paths"),
-    };
+    }];
   });
 }
 
@@ -99,34 +101,36 @@ function parseAgentTools(data: Record<string, unknown>): string[] | undefined {
 
 function importAgents(rootDir: string): Agent[] {
   const agentsDir = path.join(rootDir, ".claude", "agents");
-  return listMdFiles(agentsDir).map((filePath) => {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const { data, content } = parseFrontmatter(raw);
-    return {
+  return listMdFiles(agentsDir).flatMap((filePath) => {
+    const parsed = readMarkdownFile(filePath, "agent");
+    if (!parsed) return [];
+    const { data, content } = parsed;
+    return [{
       name: getStringOrFallback(data, "name", path.basename(filePath, ".md")),
       description: getString(data, "description"),
       model: getString(data, "model"),
       body: content,
       skills: getStringArray(data, "skills"),
       tools: parseAgentTools(data),
-    };
+    }];
   });
 }
 
 function importCommands(rootDir: string): Command[] {
   const commandsDir = path.join(rootDir, ".claude", "commands");
-  return listMdFiles(commandsDir).map((filePath) => {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const { data, content } = parseFrontmatter(raw);
+  return listMdFiles(commandsDir).flatMap((filePath) => {
+    const parsed = readMarkdownFile(filePath, "command");
+    if (!parsed) return [];
+    const { data, content } = parsed;
     const allowedToolsRaw = getString(data, "allowed-tools");
-    return {
+    return [{
       name: path.basename(filePath, ".md"),
       description: getString(data, "description"),
       body: content,
       allowedTools: allowedToolsRaw
         ? allowedToolsRaw.split(",").map((t) => t.trim())
         : undefined,
-    };
+    }];
   });
 }
 
@@ -170,6 +174,11 @@ function importPermissions(rootDir: string): PermissionEntry[] {
   });
 }
 
+const FORMAT_RUNNER_MARKER = "harnessport-format.mjs";
+const FORMAT_RUNNER_REL = `.claude/hooks/${FORMAT_RUNNER_MARKER}`;
+const FORMAT_RUNNER_COMMAND = `node "$CLAUDE_PROJECT_DIR/${FORMAT_RUNNER_REL}"`;
+const SHELL_SYNTAX = /["'|&;$<>`]/;
+
 function isFormatterHook(
   event: string,
   matcher: string | undefined,
@@ -179,8 +188,16 @@ function isFormatterHook(
     event === "PostToolUse" &&
     matcher !== undefined &&
     /Edit|Write|MultiEdit/.test(matcher) &&
-    /\$FILEPATH/.test(command)
+    (command.includes(FORMAT_RUNNER_MARKER) || /\$FILEPATH/.test(command))
   );
+}
+
+/** Glob and command of a formatter handler, from the runner form or the legacy `$FILEPATH` form. */
+function parseFormatterCommand(command: string): Formatter {
+  const runner = new RegExp(`${FORMAT_RUNNER_MARKER}"?\\s+"([^"]*)"\\s+(.*)$`).exec(command);
+  if (runner) return { glob: runner[1], command: runner[2].trim() };
+  const cmd = command.replace(/\s*\$FILEPATH\s*$/, "").trim();
+  return { glob: inferGlobFromCommand(cmd), command: cmd };
 }
 
 function inferGlobFromCommand(cmd: string): string {
@@ -191,43 +208,75 @@ function inferGlobFromCommand(cmd: string): string {
   return "*";
 }
 
+type HookHandler = {
+  type?: string;
+  command?: string;
+  args?: string[];
+  timeout?: number;
+  onFailure?: string;
+  if?: string;
+};
 type HooksJson = {
-  hooks?: Record<
-    string,
-    Array<{ hooks: Array<{ type: string; command: string }>; matcher?: string }>
-  >;
+  hooks?: Record<string, Array<{ hooks: HookHandler[]; matcher?: string }>>;
 };
 
 function isHooksJson(v: unknown): v is HooksJson {
   return typeof v === "object" && v !== null;
 }
 
-function importHooks(rootDir: string): { hooks: Hook[]; formatters: Formatter[] } {
+function importHooks(rootDir: string): {
+  hooks: Hook[];
+  formatters: Formatter[];
+  items: FidelityItem[];
+} {
   const settings = readJsonAs(
     path.join(rootDir, ".claude", "settings.json"),
     isHooksJson,
   );
 
-  if (!settings?.hooks) return { hooks: [], formatters: [] };
+  if (!settings?.hooks) return { hooks: [], formatters: [], items: [] };
 
+  const items: FidelityItem[] = [];
   const allHooks = Object.entries(settings.hooks).flatMap(([event, entries]) =>
     entries.flatMap((entry) =>
-      entry.hooks.map((hook) => ({ event, matcher: entry.matcher, command: hook.command })),
+      entry.hooks.flatMap((handler) => {
+        const type = handler.type ?? "command";
+        if (type !== "command" || typeof handler.command !== "string") {
+          items.push(
+            hookStatus(
+              { event, command: "" },
+              "Claude Code",
+              `imports only command handlers, not "${type}"`,
+              "import",
+            ),
+          );
+          return [];
+        }
+        if (handler.if !== undefined) {
+          items.push({
+            phase: "import",
+            kind: "hook",
+            name: event,
+            status: "lossy",
+            reason: `the "if" condition is not carried, so the hook fires on every matcher hit`,
+          });
+        }
+        const hook: Hook = { event, matcher: entry.matcher, command: handler.command };
+        if (handler.onFailure === "block") hook.failClosed = true;
+        if (typeof handler.timeout === "number") hook.timeout = handler.timeout;
+        if (Array.isArray(handler.args)) hook.args = handler.args;
+        return [hook];
+      }),
     ),
   );
 
   const formatters = allHooks
     .filter((h) => isFormatterHook(h.event, h.matcher, h.command))
-    .map((h) => {
-      const cmd = h.command.replace(/\s*\$FILEPATH\s*$/, "").trim();
-      return { glob: inferGlobFromCommand(cmd), command: cmd };
-    });
+    .map((h) => parseFormatterCommand(h.command));
 
-  const hooks = allHooks
-    .filter((h) => !isFormatterHook(h.event, h.matcher, h.command))
-    .map((h) => ({ event: h.event, matcher: h.matcher, command: h.command }));
+  const hooks = allHooks.filter((h) => !isFormatterHook(h.event, h.matcher, h.command));
 
-  return { hooks, formatters };
+  return { hooks, formatters, items };
 }
 
 function isEnabledServersJson(
@@ -328,7 +377,33 @@ function exportCommands(
   return files;
 }
 
-type HookEntry = { hooks: Array<{ type: string; command: string }>; matcher?: string };
+const acceptsClaudeDialect = (h: Hook): boolean => !h.dialect || h.dialect === "claude";
+
+type HookEntry = { hooks: HookHandler[]; matcher?: string };
+
+const shellSyntaxIn = (fmt: Formatter): string | undefined =>
+  SHELL_SYNTAX.exec(`${fmt.glob} ${fmt.command}`)?.[0];
+
+const writableFormatters = (config: HarnessConfig): Formatter[] =>
+  config.formatters.filter((f) => shellSyntaxIn(f) === undefined);
+
+// Reads the edited path from stdin, so the formatter needs no shell and no $FILEPATH quoting.
+const FORMAT_RUNNER_SOURCE = [
+  'import { spawnSync } from "node:child_process";',
+  'import { readFileSync } from "node:fs";',
+  'import { basename } from "node:path";',
+  "const [glob, ...cmd] = process.argv.slice(2);",
+  "const toRegExp = (g) => new RegExp(\"^\" + g.replace(/[.+^$()|[\\]\\\\]/g, \"\\\\$&\")",
+  "  .replace(/\\{([^}]*)\\}/g, (_, a) => \"(\" + a.split(\",\").join(\"|\") + \")\")",
+  "  .replace(/\\*\\*/g, \"\\0\").replace(/\\*/g, \"[^/]*\").replace(/\\?/g, \"[^/]\").replace(/\\0/g, \".*\") + \"$\");",
+  "let file;",
+  "try { file = JSON.parse(readFileSync(0, \"utf-8\")).tool_input?.file_path; } catch (e) {}",
+  "if (typeof file !== \"string\" || file === \"\" || cmd.length === 0) process.exit(0);",
+  "if (!toRegExp(glob).test(glob.includes(\"/\") ? file : basename(file))) process.exit(0);",
+  "const r = spawnSync(cmd[0], [...cmd.slice(1), file], { stdio: \"inherit\" });",
+  "process.exit(r.status ?? 1);",
+  "",
+].join("\n");
 
 function buildHooksJson(
   config: HarnessConfig,
@@ -336,18 +411,21 @@ function buildHooksJson(
   const hooksObj: Record<string, HookEntry[]> = {};
 
   for (const hook of config.hooks) {
+    if (!acceptsClaudeDialect(hook)) continue;
     if (!hooksObj[hook.event]) hooksObj[hook.event] = [];
-    const entry: HookEntry = {
-      hooks: [{ type: "command", command: hook.command }],
-    };
+    const handler: HookHandler = { type: "command", command: hook.command };
+    if (hook.args) handler.args = hook.args;
+    if (hook.timeout !== undefined) handler.timeout = hook.timeout;
+    if (hook.failClosed) handler.onFailure = "block";
+    const entry: HookEntry = { hooks: [handler] };
     if (hook.matcher) entry.matcher = hook.matcher;
     hooksObj[hook.event].push(entry);
   }
 
-  for (const fmt of config.formatters) {
+  for (const fmt of writableFormatters(config)) {
     if (!hooksObj.PostToolUse) hooksObj.PostToolUse = [];
     hooksObj.PostToolUse.push({
-      hooks: [{ type: "command", command: `${fmt.command} $FILEPATH` }],
+      hooks: [{ type: "command", command: `${FORMAT_RUNNER_COMMAND} "${fmt.glob}" ${fmt.command}` }],
       matcher: "Edit|Write|MultiEdit",
     });
   }
@@ -384,7 +462,13 @@ function exportSettings(
 ): string[] {
   const files: string[] = [];
 
-  if (config.hooks.length > 0 || config.formatters.length > 0) {
+  const formatters = writableFormatters(config);
+  if (formatters.length > 0) {
+    const runner = path.join(rootDir, FORMAT_RUNNER_REL);
+    if (writeIfNotDry(runner, FORMAT_RUNNER_SOURCE, ctx)) files.push(runner);
+  }
+
+  if (config.hooks.length > 0 || formatters.length > 0) {
     const hooksObj = buildHooksJson(config);
     const filePath = path.join(rootDir, ".claude", "settings.json");
     if (writeIfNotDry(filePath, `${JSON.stringify({ hooks: hooksObj }, null, 2)}\n`, ctx)) {
@@ -404,34 +488,26 @@ function exportSettings(
 }
 
 
-/**
- * Classify one formatter on the way out.
- *
- * Claude Code runs a formatter as a PostToolUse hook, whose `matcher` selects tool names, not file
- * paths — so `Formatter.glob` has nowhere to be stored, and the importer re-derives it from the
- * command. Where that re-derivation would not reproduce the original, the glob silently changes,
- * usually by widening: `*.ts` becoming `*` runs the formatter over every file in the repository.
- * Reusing `inferGlobFromCommand` means this claim and the importer's behaviour cannot disagree.
- */
+/** The runner carries the glob as an argument, so a formatter is exact unless it needs a shell. */
 function formatterItem(fmt: Formatter): FidelityItem {
-  const seen = inferGlobFromCommand(fmt.command);
-  if (seen === fmt.glob) {
+  const char = shellSyntaxIn(fmt);
+  if (char === undefined) {
     return { phase: "export", kind: "formatter", name: fmt.glob, status: "exact" };
   }
   return {
     phase: "export",
     kind: "formatter",
     name: fmt.glob,
-    status: "lossy",
-    reason: `Claude Code hooks match tool names, not file paths, so "${fmt.glob}" is not stored; the glob is re-derived from the command and will be seen as "${seen}"`,
+    status: "dropped",
+    reason: `the formatter runner spawns without a shell, so the \`${char}\` character cannot be passed; this formatter was not written`,
   };
 }
 
 export const claudeConverter: Converter = {
   name: "claude",
   label: "Claude Code",
-  // Formatters are `full` by way of hooks: imported from a PostToolUse hook matching
-  // Edit|Write|MultiEdit whose command ends in $FILEPATH, and written back in that shape.
+  // Formatters are `full` by way of hooks: a PostToolUse hook matching Edit|Write|MultiEdit that
+  // runs .claude/hooks/harnessport-format.mjs (or the legacy `$FILEPATH` form).
   capabilities: {
     rule: "full",
     agent: "full",
@@ -465,7 +541,7 @@ export const claudeConverter: Converter = {
   },
 
   import(rootDir: string): HarnessConfig {
-    const { hooks, formatters } = importHooks(rootDir);
+    const { hooks, formatters, items: hookItems } = importHooks(rootDir);
     const mcpServers: McpServer[] = importMcpFromJson(
       path.join(rootDir, ".mcp.json"),
     );
@@ -488,7 +564,7 @@ export const claudeConverter: Converter = {
       permissions: importPermissions(rootDir),
       hooks,
       formatters,
-      items: takeReadProblems(),
+      items: [...takeReadProblems(), ...hookItems],
     };
   },
 
@@ -526,7 +602,12 @@ export const claudeConverter: Converter = {
       ...exactItems("skill", config.skills.map((s) => s.name)),
       ...exactItems("command", config.commands.map((c) => c.name)),
       ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
-      ...exactItems("hook", config.hooks.map((h) => h.event)),
+      ...exactItems("hook", config.hooks.filter(acceptsClaudeDialect).map((h) => h.event)),
+      ...config.hooks
+        .filter((h) => !acceptsClaudeDialect(h))
+        .map((h) =>
+          hookStatus(h, "Claude Code", `does not accept hooks of dialect "${h.dialect}"`),
+        ),
       ...config.formatters.map(formatterItem),
       ...config.permissions.map((p) =>
         permissionStatus(p, claudeConverter.permissionActions, "Claude Code"),

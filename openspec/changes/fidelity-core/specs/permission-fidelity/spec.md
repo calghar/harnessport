@@ -65,7 +65,6 @@ a `blocked` item and SHALL NOT be written in any weakened form. No flag SHALL do
 | claude   | exact   |
 | opencode | exact   |
 | cursor   | blocked |
-| windsurf | blocked |
 | copilot  | blocked |
 | codex    | blocked |
 

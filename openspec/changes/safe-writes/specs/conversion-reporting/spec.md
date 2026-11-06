@@ -22,3 +22,10 @@ SHALL NOT be reported as an empty result.
 - **WHEN** importing from claude
 - **THEN** no item names `.mcp.json`
 - **AND** the config holds no MCP servers
+
+#### Scenario: A malformed frontmatter file is reported, not fatal
+- **GIVEN** a source directory holding `.claude/agents/bad.md` with invalid YAML frontmatter and `.claude/agents/good.md` with valid frontmatter
+- **WHEN** importing from claude
+- **THEN** the import does not throw
+- **AND** the config holds the agent from `good.md`
+- **AND** a `blocked` item with phase `import` and kind `agent` is reported, naming `bad.md` and the YAML error

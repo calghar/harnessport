@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import type {
   FidelityItem,
   HarnessConfig,
+  Hook,
   McpServer,
   PermissionEntry,
   Skill,
@@ -33,6 +34,25 @@ export function parseFrontmatter(raw: string): FrontmatterResult {
       : {};
 
   return { data, content: raw.slice(match[0].length).trim() };
+}
+
+/** Read and parse a markdown file; invalid YAML frontmatter is reported as `blocked` and the file skipped. */
+export function readMarkdownFile(
+  filePath: string,
+  kind: FidelityItem["kind"],
+): FrontmatterResult | undefined {
+  const raw = readFileIfExists(filePath);
+  if (raw === undefined) return undefined;
+  try {
+    return parseFrontmatter(raw);
+  } catch (err) {
+    recordReadProblem(
+      filePath,
+      `${path.basename(filePath)} has invalid YAML frontmatter: ${err instanceof Error ? err.message : String(err)}`,
+      kind,
+    );
+    return undefined;
+  }
 }
 
 export function serializeFrontmatter(
@@ -162,10 +182,14 @@ export function takeReadProblems(): FidelityItem[] {
   return readProblems.splice(0, readProblems.length);
 }
 
-function recordReadProblem(filePath: string, reason: string): void {
+function recordReadProblem(
+  filePath: string,
+  reason: string,
+  kind: FidelityItem["kind"] = "rule",
+): void {
   readProblems.push({
     phase: "import",
-    kind: "rule",
+    kind,
     name: filePath,
     status: "blocked",
     reason,
@@ -344,8 +368,19 @@ export function uniqueSlugs(names: string[]): string[] {
 /**
  * Parse a single SKILL.md file into a Skill object.
  */
-function parseSkillMd(raw: string, fallbackName: string): Skill {
-  const { data, content } = parseFrontmatter(raw);
+function parseSkillMd(raw: string, fallbackName: string, filePath: string): Skill | undefined {
+  let parsed: FrontmatterResult;
+  try {
+    parsed = parseFrontmatter(raw);
+  } catch (err) {
+    recordReadProblem(
+      filePath,
+      `${path.basename(filePath)} has invalid YAML frontmatter: ${err instanceof Error ? err.message : String(err)}`,
+      "skill",
+    );
+    return undefined;
+  }
+  const { data, content } = parsed;
   return {
     name: getStringOrFallback(data, "name", fallbackName),
     description: getString(data, "description"),
@@ -361,14 +396,21 @@ export function importSkillsFromDir(
   skillsDir: string,
   options: { nested?: boolean; flatMd?: boolean } = {},
 ): Skill[] {
+  const parseOne = (raw: string, fallback: string, filePath: string): Skill[] => {
+    const skill = parseSkillMd(raw, fallback, filePath);
+    return skill ? [skill] : [];
+  };
+
   const fromSubdirs = listSubdirs(skillsDir).flatMap((subDir) => {
-    const main = readFileIfExists(path.join(subDir, "SKILL.md"));
-    const results = main ? [parseSkillMd(main, path.basename(subDir))] : [];
+    const mainPath = path.join(subDir, "SKILL.md");
+    const main = readFileIfExists(mainPath);
+    const results = main ? parseOne(main, path.basename(subDir), mainPath) : [];
 
     if (options.nested) {
       const nested = listSubdirs(subDir).flatMap((nestedDir) => {
-        const nestedMd = readFileIfExists(path.join(nestedDir, "SKILL.md"));
-        return nestedMd ? [parseSkillMd(nestedMd, path.basename(nestedDir))] : [];
+        const nestedPath = path.join(nestedDir, "SKILL.md");
+        const nestedMd = readFileIfExists(nestedPath);
+        return nestedMd ? parseOne(nestedMd, path.basename(nestedDir), nestedPath) : [];
       });
       results.push(...nested);
     }
@@ -377,9 +419,9 @@ export function importSkillsFromDir(
   });
 
   const fromFlatMd = options.flatMd
-    ? listMdFiles(skillsDir).map((filePath) => {
+    ? listMdFiles(skillsDir).flatMap((filePath) => {
         const raw = fs.readFileSync(filePath, "utf-8");
-        return parseSkillMd(raw, path.basename(filePath, ".md"));
+        return parseOne(raw, path.basename(filePath, ".md"), filePath);
       })
     : [];
 
@@ -540,9 +582,37 @@ export function permissionStatus(
   return { phase: "export", kind: "permission", name, status, reason };
 }
 
+export const GUARDRAIL_EVENTS: ReadonlySet<string> = new Set([
+  "PreToolUse",
+  "PermissionRequest",
+  "UserPromptSubmit",
+]);
+
+/**
+ * Status for a hook the target does not write. A guardrail the target cannot enforce is `blocked`,
+ * because dropping it silently removes a control; any other hook is `dropped`.
+ */
+export function hookStatus(
+  hook: Hook,
+  targetName: string,
+  limitation: string,
+  phase: FidelityItem["phase"] = "export",
+): FidelityItem {
+  const blocked = GUARDRAIL_EVENTS.has(hook.event);
+  return {
+    phase,
+    kind: "hook",
+    name: hook.event,
+    status: blocked ? "blocked" : "dropped",
+    reason: blocked
+      ? `${targetName} ${limitation}; this guardrail was not written`
+      : `${targetName} ${limitation}, so this hook was dropped`,
+  };
+}
+
 /**
  * Standard items for features a target cannot represent.
- * Shared by the cursor, windsurf, copilot, and codex exporters.
+ * Shared by the cursor, copilot, and codex exporters.
  *
  * Permissions are handled separately by `permissionStatus`, because they are the one kind
  * whose loss can weaken a security posture.
@@ -554,7 +624,9 @@ export function generateDropItems(
     skills?: string;
     commands?: string;
     mcpServers?: string;
-    hooksFormatters?: string;
+    hooks?: string;
+    formatters?: string;
+    targetName?: string;
   },
 ): FidelityItem[] {
   const items: FidelityItem[] = [];
@@ -581,9 +653,14 @@ export function generateDropItems(
   if (unsupported.mcpServers && config.mcpServers.length > 0) {
     drop("mcp", config.mcpServers.map((s) => s.name), unsupported.mcpServers);
   }
-  if (unsupported.hooksFormatters) {
-    drop("hook", config.hooks.map((h) => h.event), unsupported.hooksFormatters);
-    drop("formatter", config.formatters.map((f) => f.glob), unsupported.hooksFormatters);
+  const hooksReason = unsupported.hooks;
+  if (hooksReason) {
+    items.push(
+      ...config.hooks.map((h) => hookStatus(h, unsupported.targetName ?? "The target", hooksReason)),
+    );
+  }
+  if (unsupported.formatters) {
+    drop("formatter", config.formatters.map((f) => f.glob), unsupported.formatters);
   }
   return items;
 }

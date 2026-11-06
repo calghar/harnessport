@@ -25,7 +25,7 @@
       when the action is `deny` or `ask` and it is not. This is the single place the
       never-weaken rule is enforced; no converter reimplements it.
 - [x] 2.3 Regression test for 2.2 covering the target matrix in the `permission-fidelity` spec:
-      claude and opencode `exact`; cursor, windsurf, copilot, codex `blocked`.
+      claude and opencode `exact`; cursor, copilot, codex `blocked`.
 
 ## 3. Converters (sequential, one reviewable unit each)
 
@@ -44,11 +44,10 @@
       shorthand-only tool holding a `deny` is refused and `opencode.json` does not grant it `allow`.
 - [x] 3.7 `src/converters/cursor.ts`: return items via `generateDropItems`; permissions with a
       non-allow action become `blocked`. Assert emitted files are unchanged.
-- [x] 3.8 `src/converters/windsurf.ts`: same as 3.7.
 - [x] 3.9 `src/converters/copilot.ts`: same as 3.7.
 - [x] 3.10 `src/converters/codex.ts`: same as 3.7, and move the import-side warning at
        `codex.ts:94` onto an item with phase `import`.
-- [x] 3.11 Regression test across 3.7–3.10: for each of the four targets, emitted file paths and
+- [x] 3.11 Regression test across 3.7–3.10: for each of the three targets, emitted file paths and
        contents are identical to those produced before this change for a config with no deny rules.
 
 ## 4. CLI surface

@@ -1,6 +1,6 @@
 ## Context
 
-`Rule` already carries `globs`, and five of six converters round-trip it correctly. `claude.ts` is
+`Rule` already carries `globs`, and four of five converters round-trip it correctly. `claude.ts` is
 the only one that drops it: `importRules` (`:43-48`) reads a single file and sets no globs, and the
 exporter calls `exportRulesToFile` (`:373`), which concatenates every rule into one always-on file.
 `fidelity-core` added a placeholder `lossy` item at `:404-415` acknowledging this; that placeholder
@@ -59,8 +59,8 @@ written-with-detail-dropped, which is the definition of `lossy`. Reporting it `d
 the content vanished.
 
 **`getGlobs` is reused for `paths:`.** It already accepts a string or a list and normalises to a
-comma-joined string, which is exactly the shape `Rule.globs` uses and what Cursor and Windsurf
-already feed it. No new parsing.
+comma-joined string, which is exactly the shape `Rule.globs` uses and what Cursor
+already feeds it. No new parsing.
 
 **Rule filenames route through `uniqueSlugs`.** Two rules whose sources slugify identically would
 otherwise collide in `.claude/rules/`, which is the bug `safe-writes` fixed elsewhere; the new

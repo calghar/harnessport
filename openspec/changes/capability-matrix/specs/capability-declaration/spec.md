@@ -15,7 +15,7 @@ The record SHALL be total: a converter that omits a feature key, or a `Feature` 
 converter declares, SHALL fail type checking.
 
 #### Scenario: Every converter declares every feature
-- **GIVEN** the six converters claude, opencode, cursor, windsurf, copilot, and codex
+- **GIVEN** the five converters claude, opencode, cursor, copilot, and codex
 - **WHEN** reading each converter's `capabilities`
 - **THEN** each declares a value for all eight features
 - **AND** each value is one of `full`, `user-level`, or `none`
@@ -36,9 +36,6 @@ converter declares, SHALL fail type checking.
 | copilot  | command    | full       |
 | copilot  | mcp        | full       |
 | copilot  | hook       | full       |
-| windsurf | agent      | none       |
-| windsurf | mcp        | user-level |
-| windsurf | command    | full       |
 | codex    | agent      | user-level |
 | codex    | mcp        | user-level |
 | codex    | command    | none       |
@@ -87,9 +84,6 @@ that feature SHALL produce fidelity items whose statuses agree with the declarat
 #### Examples:
 | tool     | feature    |
 |----------|------------|
-| windsurf | agent      |
-| windsurf | mcp        |
-| windsurf | hook       |
 | cursor   | permission |
 | cursor   | hook       |
 | cursor   | formatter  |
@@ -105,11 +99,6 @@ that feature SHALL produce fidelity items whose statuses agree with the declarat
 Where a converter declares a feature `user-level`, the fidelity item it emits for that feature on
 export SHALL carry a reason naming the out-of-repository path holding it, so a user can copy the
 configuration across by hand.
-
-#### Scenario: Windsurf MCP names the user-level config file
-- **GIVEN** a canonical config holding one MCP server
-- **WHEN** exporting to windsurf
-- **THEN** the `mcp` item's reason contains `~/.codeium/windsurf/mcp_config.json`
 
 #### Scenario: Codex agents name the user-level config file
 - **GIVEN** a canonical config holding one agent
@@ -137,8 +126,6 @@ each. It SHALL NOT report a feature as unavailable when the converter implements
 | copilot  | Commands    | ✓      |
 | copilot  | MCP Servers | ✓      |
 | copilot  | Hooks       | ✓      |
-| windsurf | MCP Servers | ~      |
-| windsurf | Agents      | -      |
 | codex    | Agents      | ~      |
 | codex    | Permissions | -      |
 

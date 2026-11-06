@@ -73,8 +73,51 @@ describe("Cursor wrapper", () => {
   });
 });
 
+const read = (dir: string, rel: string) => fs.readFileSync(path.join(dir, rel), "utf-8");
+
+describe("Cursor hook export honesty", () => {
+  const TSX = path.resolve("node_modules/.bin/tsx");
+  const CLI = path.resolve("src/index.ts");
+  const handler = { type: "command", command: "./guard.sh" };
+  const convert = (src: string, target: string) =>
+    spawnSync(TSX, [CLI, "convert", "--from", "claude", "--to", "cursor", "--source", src, "--target", target, "--json"], { encoding: "utf-8" });
+  const claudeProject = (): string => {
+    const src = tmpDir();
+    fs.mkdirSync(path.join(src, ".claude"));
+    fs.writeFileSync(
+      path.join(src, ".claude", "settings.json"),
+      JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [handler] }] } }),
+    );
+    return src;
+  };
+  const hookItem = (stdout: string) =>
+    (JSON.parse(stdout).items as Array<{ kind: string; name: string; status: string; reason?: string }>).find(
+      (i) => i.kind === "hook" && i.name === "PreToolUse",
+    );
+
+  it("reports the guardrail blocked and exits 2 when hooks.json is refused", () => {
+    const target = tmpDir();
+    const differing = '{"version":1,"hooks":{"afterFileEdit":[{"command":"./audit.sh"}]}}';
+    fs.mkdirSync(path.join(target, ".cursor"));
+    fs.writeFileSync(path.join(target, ".cursor", "hooks.json"), differing);
+    const r = convert(claudeProject(), target);
+    expect(r.status).toBe(2);
+    const item = hookItem(r.stdout);
+    expect(item?.status).toBe("blocked");
+    expect(item?.reason).toMatch(/already exists/);
+    expect(read(target, ".cursor/hooks.json")).toBe(differing);
+  }, 60_000);
+
+  it("keeps the exact status and exit 0 when hooks.json is written", () => {
+    const target = tmpDir();
+    const r = convert(claudeProject(), target);
+    expect(r.status).toBe(0);
+    expect(hookItem(r.stdout)?.status).toBe("exact");
+    expect(JSON.parse(read(target, ".cursor/hooks.json")).hooks.preToolUse).toHaveLength(1);
+  }, 60_000);
+});
+
 describe("Cursor hook export", () => {
-  const read = (dir: string, rel: string) => fs.readFileSync(path.join(dir, rel), "utf-8");
 
   it("writes hooks.json and the wrapper, and is idempotent", () => {
     const dir = tmpDir();

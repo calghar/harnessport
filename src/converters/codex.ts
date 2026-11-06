@@ -73,7 +73,9 @@ function codexHookLimitation(hook: Hook): string | undefined {
     const token = matcher.split("|").find((t) => t !== CODEX_TOOL);
     if (token !== undefined) return `has no verified matcher for \`${token}\` (only ${CODEX_TOOL} is written)`;
   }
-  if (hook.failClosed) return "has no verified fail-closed field";
+  if (hook.failClosed) {
+    return "has no fail-closed field in the openai/codex handler schema (UNVERIFIED: exit-code semantics were not checked)";
+  }
   if (hook.args) return "has no verified exec-form args field";
   return undefined;
 }
@@ -100,14 +102,16 @@ function exportHooks(
             kind: "hook",
             name: hook.event,
             status: "lossy",
-            reason: "Codex CLI has no verified hook timeout field, so the timeout was not written",
+            reason:
+              "written as the handler `timeout` field (openai/codex config.schema.json); the unit is UNVERIFIED (seconds assumed from `timeout_sec` in discovery.rs)",
           },
     );
   }
   if (written.length === 0) return { files: [], items };
 
-  // Group hooks into Codex format: { "Event": [ { matcher?: "...", hooks: [ ... ] } ] }
-  const grouped = written.reduce<Record<string, Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>>>((acc, hook) => {
+  // Shape: { "Event": [ { matcher?, hooks: [ ... ] } ] }. Source: openai/codex config.schema.json
+  // (MatcherGroup) and hooks/src/engine/discovery.rs (hooks.json). Not from the docs site.
+  const grouped = written.reduce<Record<string, Array<{ matcher?: string; hooks: Array<{ type: string; command: string; timeout?: number }> }>>>((acc, hook) => {
     if (!acc[hook.event]) acc[hook.event] = [];
     const matcherKey = hook.matcher ?? "";
     let group = acc[hook.event].find((g) => (g.matcher ?? "") === matcherKey);
@@ -115,7 +119,11 @@ function exportHooks(
       group = { hooks: [], ...(hook.matcher ? { matcher: hook.matcher } : {}) };
       acc[hook.event].push(group);
     }
-    group.hooks.push({ type: "command", command: hook.command });
+    group.hooks.push({
+      type: "command",
+      command: hook.command,
+      ...(hook.timeout === undefined ? {} : { timeout: hook.timeout }),
+    });
     return acc;
   }, {});
 
@@ -126,13 +134,15 @@ function exportHooks(
 
 // --- Converter ---
 
+const PERMISSION_LIMITATION =
+  "supports shell command `prefix_rule` rules, but this exporter writes none because the rules file path and project scope are UNVERIFIED";
+
 export const codexConverter: Converter = {
   name: "codex",
   label: "Codex CLI",
   // Agents and MCP servers live in ~/.codex/config.toml, which is user-level and not read.
-  // Permissions are `none`, not user-level: Codex has approval_policy and sandbox_mode, which are
-  // a sandbox mode rather than a tool-and-pattern list, so a PermissionEntry has nothing to map
-  // onto — the feature is absent, not merely out of reach.
+  // Permissions: `none` means harnessport writes none. Codex has shell-only `prefix_rule` rules
+  // (allow/prompt/forbidden; execpolicy README), but their file path and project scope are UNVERIFIED.
   capabilities: {
     rule: "full",
     agent: "user-level",
@@ -217,7 +227,7 @@ export const codexConverter: Converter = {
       ...exactItems("skill", config.skills.map((s) => s.name)),
       ...hookExport.items,
       ...config.permissions.map((p) =>
-        permissionStatus(p, codexConverter.permissionActions, "Codex CLI"),
+        permissionStatus(p, codexConverter.permissionActions, "Codex CLI", PERMISSION_LIMITATION),
       ),
     );
 

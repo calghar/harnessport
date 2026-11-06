@@ -107,7 +107,7 @@ Feature: cursor-hook-wrapper
     Then `seen.json` holds `tool_name` equal to `Write`
 
   # Requirement: The wrapper maps the command's result to Cursor's preToolUse contract
-  # The wrapper SHALL map the original command's result as follows. The decision SHALL be read from `hookSpecificOutput.permissionDecision`, then top-level `permissionDecision`, then legacy `decision`. `deny`, `ask` and `block` exit `2`. `allow` and `approve` allow. Valid JSON that is not an object exits `2`. | Command result | Wrapper stdout | Wrapper exit | |---|---|---| | exit `2` | none, command stderr forwarded | `2` | | exit `0`, decision `deny`, `ask` or `block` (any of the three fields) | none, `permissionDecisionReason` or `reason` on stderr | `2` | | exit `0`, decision `allow` or `approve` | `{"permission":"allow"}` plus `updated_input` when the command gave `updatedInput` | `0` | | exit `0`, empty stdout, or a JSON object with no decision field | `{"permission":"allow"}` | `0` | | exit `0`, stdout that is not JSON, JSON that is not an object, or a decision value not listed above | none, a reason on stderr | `2` | | any other exit code, or the command cannot start | none, a reason on stderr | `1` | Exit `1` lets Cursor apply its fail-open default, or block when `failClosed: true` is set. This matches Claude, where exit codes other than `0` and `2` do not block unless `onFailure: "block"`.
+  # The wrapper SHALL map the original command's result as follows. The decision SHALL be read from `hookSpecificOutput.permissionDecision`, then top-level `permissionDecision`, then legacy `decision`. `deny`, `ask` and `block` exit `2`. `allow` and `approve` allow. Valid JSON that is not an object exits `2`. | Command result | Wrapper stdout | Wrapper exit | |---|---|---| | exit `2` | none, command stderr forwarded | `2` | | exit `0`, decision `deny`, `ask` or `block` (any of the three fields) | none, `permissionDecisionReason` or `reason` on stderr | `2` | | exit `0`, decision `allow` or `approve` | `{"permission":"allow"}` plus `updated_input` when the command gave `updatedInput` | `0` | | exit `0`, empty stdout, or a JSON object with no decision field | `{"permission":"allow"}` | `0` | | exit `0`, stdout that is not JSON | `{"permission":"allow"}`, the command stdout on stderr | `0` | | exit `0`, JSON that is not an object, or a decision value not listed above | none, a reason on stderr | `2` | | any other exit code, or the command cannot start | none, a reason on stderr | `1` | Exit `1` lets Cursor apply its fail-open default, or block when `failClosed: true` is set. This matches Claude, where exit codes other than `0` and `2` do not block unless `onFailure: "block"`.
 
   @requirement_the_wrapper_maps_the_command_s_result_to_cursor_s_pretooluse_contract
   Scenario: Exit 2 denies
@@ -158,10 +158,11 @@ Feature: cursor-hook-wrapper
     Then the wrapper stdout parses to `{"permission": "allow", "updated_input": {"command": "ls -la"}}`
 
   @requirement_the_wrapper_maps_the_command_s_result_to_cursor_s_pretooluse_contract
-  Scenario: Output that is not JSON fails closed
-    Given a wrapper generated for a command that exits `0` and prints `ok`
+  Scenario: Output that is not JSON allows the call
+    Given a wrapper generated for a command that exits `0` and prints `Warning: x`
     When the wrapper is run with a Shell payload
-    Then the wrapper exits `2`
+    Then the wrapper stdout parses to `{"permission": "allow"}` and the wrapper exits `0`
+    And the wrapper stderr contains `Warning: x`
 
   @requirement_the_wrapper_maps_the_command_s_result_to_cursor_s_pretooluse_contract
   Scenario: A crash is passed to Cursor's fail mode

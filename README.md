@@ -219,7 +219,7 @@ reason rather than disappearing. See [Fidelity reporting](#fidelity-reporting).
 | Agents | `.claude/agents/*.md` | `.opencode/agents/*.md` | `.cursor/agents/*.md` | `.github/agents/*.agent.md` | `~/.codex/config.toml` |
 | Skills | `.claude/skills/*/SKILL.md` | `.opencode/skills/*/SKILL.md` | `.cursor/skills/*/SKILL.md` | `.github/skills/*/SKILL.md` | `.codex/skills/*/SKILL.md` |
 | Commands | `.claude/commands/*.md` | `.opencode/commands/*.md` | `.cursor/commands/*.md` | `.github/prompts/*.prompt.md` | - |
-| MCP | `.mcp.json` | `opencode.json` | `.cursor/mcp.json` | `.copilot/mcp-config.json` | `~/.codex/config.toml` |
+| MCP | `.mcp.json` | `opencode.json` | `.cursor/mcp.json` | `.github/mcp.json` | `~/.codex/config.toml` |
 | Hooks | `.claude/settings.json` | - | `.cursor/hooks.json` (Node wrappers) | `.github/hooks/*.json` (`version: 1`) | `.codex/hooks.json` |
 
 ## Architecture

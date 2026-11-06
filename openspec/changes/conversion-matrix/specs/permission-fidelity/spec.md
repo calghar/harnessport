@@ -34,26 +34,10 @@ difference: an `ask` rule that never fires lets the command run unprompted.
 
 ### Requirement: A permission OpenCode does not write is not reported exact
 
-`buildPermissionConfig` omits `WebSearch` from the emitted `opencode.json`, because OpenCode has no
-such permission key. Such an entry SHALL be reported through the same never-weaken rule as any
-other unrepresentable permission: `dropped` when the action is `allow`, `blocked` when it is `ask`
-or `deny`. It SHALL NOT be reported `exact`.
-
-#### Scenario: An allowed WebSearch is reported dropped
-- **GIVEN** a canonical config holding a `WebSearch` permission with pattern `*` and action `allow`
-- **WHEN** exporting to opencode
-- **THEN** the `permission` item named `WebSearch(*)` has status `dropped`
-- **AND** the emitted `opencode.json` has no `websearch` permission key
-
-#### Scenario: A denied WebSearch is blocked rather than discarded
-- **GIVEN** a canonical config holding a `WebSearch` permission with pattern `*` and action `deny`
-- **WHEN** exporting to opencode
-- **THEN** the `permission` item named `WebSearch(*)` has status `blocked`
-
-#### Scenario: A denied WebSearch fails the run
-- **GIVEN** a source config holding a `WebSearch` deny rule
-- **WHEN** converting to opencode
-- **THEN** the process exits `2`
+A permission entry that `buildPermissionConfig` cannot write to the emitted `opencode.json` SHALL be
+reported through the same never-weaken rule as any other unrepresentable permission: `dropped` when
+the action is `allow`, `blocked` when it is `ask` or `deny`. It SHALL NOT be reported `exact`.
+`WebSearch` is written as the `websearch` key; see `opencode-permissions`.
 
 #### Scenario: WebFetch is unaffected
 - **GIVEN** a canonical config holding a `WebFetch` permission with pattern `*` and action `allow`

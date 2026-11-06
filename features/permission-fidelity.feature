@@ -31,26 +31,7 @@ Feature: permission-fidelity
     Then the imported permission's tool is `external_directory`
 
   # Requirement: A permission OpenCode does not write is not reported exact
-  # `buildPermissionConfig` omits `WebSearch` from the emitted `opencode.json`, because OpenCode has no such permission key. Such an entry SHALL be reported through the same never-weaken rule as any other unrepresentable permission: `dropped` when the action is `allow`, `blocked` when it is `ask` or `deny`. It SHALL NOT be reported `exact`.
-
-  @requirement_a_permission_opencode_does_not_write_is_not_reported_exact
-  Scenario: An allowed WebSearch is reported dropped
-    Given a canonical config holding a `WebSearch` permission with pattern `*` and action `allow`
-    When exporting to opencode
-    Then the `permission` item named `WebSearch(*)` has status `dropped`
-    And the emitted `opencode.json` has no `websearch` permission key
-
-  @requirement_a_permission_opencode_does_not_write_is_not_reported_exact
-  Scenario: A denied WebSearch is blocked rather than discarded
-    Given a canonical config holding a `WebSearch` permission with pattern `*` and action `deny`
-    When exporting to opencode
-    Then the `permission` item named `WebSearch(*)` has status `blocked`
-
-  @requirement_a_permission_opencode_does_not_write_is_not_reported_exact
-  Scenario: A denied WebSearch fails the run
-    Given a source config holding a `WebSearch` deny rule
-    When converting to opencode
-    Then the process exits `2`
+  # A permission entry that `buildPermissionConfig` cannot write to the emitted `opencode.json` SHALL be reported through the same never-weaken rule as any other unrepresentable permission: `dropped` when the action is `allow`, `blocked` when it is `ask` or `deny`. It SHALL NOT be reported `exact`. `WebSearch` is written as the `websearch` key; see `opencode-permissions`.
 
   @requirement_a_permission_opencode_does_not_write_is_not_reported_exact
   Scenario: WebFetch is unaffected

@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Exported shell-free formatters to Cursor as an `afterFileEdit` hook, imported them back, and exported Claude `Bash` deny rules to `.cursor/cli.json`
 
+### Changed
+
+- **Breaking:** Copilot project MCP servers are read from `.github/mcp.json`; `.copilot/mcp-config.json` is no longer read
+- Allowed a Cursor hook that exits `0` with non-JSON output, and wrote that output to stderr instead of denying the call
+
+### Fixed
+
+- OpenCode `WebSearch` permissions were dropped or blocked; they are now written as the `websearch` key
+- Copilot reasons said `preToolUse` hooks cannot block and the CLI has no permission-request event; both reasons are corrected
+- Codex hook `timeout` was dropped on export; it is now carried, and unverified Codex claims are marked in the reason text
+
 ## [0.3.0] - 2026-11-06
 
 ### Security

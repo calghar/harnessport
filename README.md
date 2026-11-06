@@ -124,10 +124,13 @@ you get your files plus an accurate account of what did not carry.
 A target that cannot write or enforce a guardrail reports it `blocked`, and `convert` exits `2`.
 Any other hook it cannot write is `dropped`, and the exit code is unchanged. Cursor runs hooks
 through Node wrappers. Shell guardrails run on `beforeShellExecution`. A `Read` guardrail runs on
-`beforeReadFile` and is `lossy`. Other tool guardrails run on `preToolUse`. The wrapper recovers the
-`Read` range from the content line count, which is unverified in Cursor. The command runs twice when
-`.claude/settings.json` also holds it and Cursor's Third-Party Imports is on. Turning that setting off
-stops the second run. Cursor has no `Notification` event, so that hook is `dropped`.
+`beforeReadFile` and is `lossy`. A `preToolUse` wrapper first marks each agent read by `tool_use_id`,
+and `beforeReadFile` enforces only marked reads, so Cursor's own whole-file reads for edits pass. A
+read whose `preToolUse` never ran is allowed, and that event order is unverified. The wrapper
+recovers the `Read` range from the content line count. Other tool guardrails run on `preToolUse`. The command runs twice when
+`.claude/settings.json` also holds it and Cursor's Third-Party Imports is on. In the IDE, turning that
+setting off stops the second run. The Cursor CLI has no opt-out, so there the command always runs
+twice. Cursor has no `Notification` event, so that hook is `dropped`.
 
 ### Check the report rather than trusting it
 

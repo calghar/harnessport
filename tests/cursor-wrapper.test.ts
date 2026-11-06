@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
@@ -8,6 +8,9 @@ import { claudeConverter } from "../src/converters/claude.js";
 import { cursorConverter } from "../src/converters/cursor.js";
 import type { ExportOptions } from "../src/converters/types.js";
 import type { Hook, HarnessConfig } from "../src/schema.js";
+
+// Each case spawns Node wrapper processes; 5 s was too tight under load.
+vi.setConfig({ testTimeout: 30_000 });
 
 const WRAPPER = ".cursor/hooks/harnessport-guard-1.mjs";
 const SHELL = JSON.stringify({ tool_name: "Shell", tool_input: { command: "ls" } });
@@ -140,6 +143,64 @@ describe("Cursor beforeReadFile", () => {
   });
 });
 
+describe("Cursor Read marker pairing", () => {
+  const readJson = (file: string, id: unknown, n = 600) =>
+    JSON.stringify({ hook_event_name: "beforeReadFile", file_path: file, content: lines(n), tool_use_id: id });
+  const setup = (stub: string) => {
+    const dir = tmpDir();
+    const tmp = tmpDir();
+    fs.writeFileSync(path.join(dir, "stub.mjs"), stub);
+    fs.writeFileSync(path.join(dir, "big.txt"), lines(600));
+    cursorConverter.export(dir, configWith(guard({ matcher: "Read" })), {});
+    const run = (n: number, input: string) =>
+      spawnSync("node", [`.cursor/hooks/harnessport-guard-${n}.mjs`], { cwd: dir, input, encoding: "utf-8", env: { ...process.env, TMPDIR: tmp } });
+    const marker = (id: string) => path.join(tmp, "harnessport-read", id);
+    return { dir, run, marker, file: path.join(dir, "big.txt"), ran: () => fs.existsSync(path.join(dir, "seen.json")) };
+  };
+  const deny = printing("", "too big", 2);
+
+  it("records a marker and does not run the command", () => {
+    const t = setup(SEEN_STUB);
+    const r = t.run(2, JSON.stringify({ hook_event_name: "preToolUse", tool_name: "Read", tool_use_id: "t1" }));
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ permission: "allow" });
+    expect(fs.existsSync(t.marker("t1"))).toBe(true);
+    expect(t.ran()).toBe(false);
+  });
+
+  it("enforces a full read with a marker and removes the marker", () => {
+    const t = setup(deny);
+    t.run(2, JSON.stringify({ tool_use_id: "t2" }));
+    const r = t.run(1, readJson(t.file, "t2"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("too big");
+    expect(fs.existsSync(t.marker("t2"))).toBe(false);
+  });
+
+  it("sets limit for a ranged read with a marker", () => {
+    const t = setup(SEEN_STUB);
+    t.run(2, JSON.stringify({ tool_use_id: "t3" }));
+    const r = t.run(1, readJson(t.file, "t3", 10));
+    expect(r.status).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(t.dir, "seen.json"), "utf-8")).tool_input.limit).toBe(10);
+  });
+
+  it("allows without running the command when the id has no marker", () => {
+    const t = setup(SEEN_STUB);
+    const r = t.run(1, readJson(t.file, "nomarker"));
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ permission: "allow" });
+    expect(t.ran()).toBe(false);
+  });
+
+  it("runs the command when tool_use_id is missing, not a string or unsafe", () => {
+    for (const id of [undefined, "", 7, "../x", "a/b", "a\\b"]) {
+      const t = setup(deny);
+      expect(t.run(1, readJson(t.file, id)).status, String(id)).toBe(2);
+    }
+  });
+});
+
 const read = (dir: string, rel: string) => fs.readFileSync(path.join(dir, rel), "utf-8");
 
 describe("Cursor hook export honesty", () => {
@@ -245,7 +306,10 @@ describe("Cursor hook export", () => {
     const dir = tmpDir();
     const { items } = cursorConverter.export(dir, configWith(guard({ matcher: "Write" }), guard({ matcher: "Read" })), {});
     expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks).toEqual({
-      preToolUse: [{ command: `node ${WRAPPER}`, matcher: "Write" }],
+      preToolUse: [
+        { command: `node ${WRAPPER}`, matcher: "Write" },
+        { command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read" },
+      ],
       beforeReadFile: [{ command: "node .cursor/hooks/harnessport-guard-2.mjs" }],
     });
     const hooks = items.filter((i) => i.kind === "hook");
@@ -265,7 +329,7 @@ describe("Cursor hook export", () => {
     const sha = (dir: string, rel: string) => createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex");
     const dir = tmpDir();
     const { items } = cursorConverter.export(dir, configWith(guard({ command: "./guard.sh" })), {});
-    expect(sha(dir, WRAPPER)).toBe("a0901fb7367397bcfa6e3e612d10abcb46be1284d4e40a4c123f5ea0852209b7");
+    expect(sha(dir, WRAPPER)).toBe("86b4c7c7c085e21cc691dc7c60f129864f4d6a07ee0b1f6f66c1d8f3432705ab");
     expect(sha(dir, ".cursor/hooks.json")).toBe("e7a3f206398f492486d2ea88123a226600aac2fe3ad231c6a3fa23f78219af67");
     expect(items.find((i) => i.kind === "hook")?.status).toBe("exact");
 
@@ -282,6 +346,7 @@ describe("Cursor hook export", () => {
     expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks).toEqual({
       beforeShellExecution: [{ command: `node ${WRAPPER}`, timeout: 5, failClosed: true }],
       beforeReadFile: [{ command: "node .cursor/hooks/harnessport-guard-2.mjs", timeout: 5, failClosed: true }],
+      preToolUse: [{ command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read" }],
     });
     const hooks = items.filter((i) => i.kind === "hook");
     expect(hooks).toHaveLength(1);

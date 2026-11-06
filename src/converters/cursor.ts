@@ -208,7 +208,9 @@ function exportAgents(
 // Events without a Cursor equivalent stay in `.claude/settings.json`, which Cursor loads itself.
 const WRAPPER_TEMPLATE = [
   'import { spawnSync } from "node:child_process";',
-  'import { readFileSync } from "node:fs";',
+  'import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";',
+  'import { tmpdir } from "node:os";',
+  'import { join } from "node:path";',
   "const ALLOW = new Set([\"allow\", \"approve\"]);",
   "const DENY = new Set([\"deny\", \"ask\", \"block\"]);",
   "const end = (code, message) => {",
@@ -239,16 +241,32 @@ const WRAPPER_TEMPLATE = [
   "  const context = hso.additionalContext ?? out.additionalContext;",
   "  if (CONTEXT.has(ev) && typeof context === \"string\") write({ additional_context: context });",
   "}",
+  "const MARKERS = join(tmpdir(), \"harnessport-read\");",
+  "const markerId = (i) => { const id = i && i.tool_use_id; return typeof id === \"string\" && id !== \"\" && !/[\\\\/]|\\.\\./.test(id) ? id : undefined; };",
+  "function record(input) {",
+  "  const id = markerId(input);",
+  "  if (id) {",
+  "    try {",
+  "      mkdirSync(MARKERS, { recursive: true });",
+  "      for (const f of readdirSync(MARKERS)) { try { if (Date.now() - statSync(join(MARKERS, f)).mtimeMs > 3600000) unlinkSync(join(MARKERS, f)); } catch (e) { /* raced */ } }",
+  "      writeFileSync(join(MARKERS, id), \"\");",
+  "    } catch (e) { /* no marker: the read is allowed */ }",
+  "  }",
+  "  write({ permission: \"allow\" });",
+  "}",
   "function main() {",
   "  let input;",
   "  try { input = JSON.parse(readFileSync(0, \"utf-8\")); } catch (e) { return end(1, \"harnessport-guard: stdin is not JSON\"); }",
   "  if (input && input.tool_name === \"Shell\") input.tool_name = \"Bash\";",
+  "  if (HOOK.record) return record(input);",
   "  if (HOOK.event) return relay(input);",
   "  const shellEvent = !!input && (input.hook_event_name === \"beforeShellExecution\" || (input.tool_name === undefined && typeof input.command === \"string\"));",
   "  if (shellEvent) input = { ...input, tool_name: \"Bash\", tool_input: { command: input.command, working_directory: input.cwd } };",
   "  const lines = (s) => { const n = s.split(\"\\n\").length; return s.endsWith(\"\\n\") ? n - 1 : n; };",
   "  const readEvent = !!input && (input.hook_event_name === \"beforeReadFile\" || (input.tool_name === undefined && typeof input.file_path === \"string\" && typeof input.content === \"string\"));",
   "  if (readEvent) {",
+  "    const id = markerId(input);",
+  "    if (id) { const m = join(MARKERS, id); if (!existsSync(m)) return write({ permission: \"allow\" }); try { unlinkSync(m); } catch (e) { /* already gone */ } }",
   "    const tool_input = { file_path: input.file_path };",
   "    try { const got = lines(input.content); if (got < lines(readFileSync(input.file_path, \"utf-8\"))) tool_input.limit = got; } catch (e) { /* unreadable file: no limit */ }",
   "    input = { ...input, tool_name: \"Read\", tool_input };",
@@ -276,8 +294,8 @@ const WRAPPER_TEMPLATE = [
   "",
 ].join("\n");
 
-const wrapperSource = (hook: Hook, event?: string): string =>
-  `const HOOK = ${JSON.stringify({ command: hook.command, ...(hook.args && { args: hook.args }), ...(event && { event }) })};\n${WRAPPER_TEMPLATE}`;
+const wrapperSource = (hook: Hook, event?: string, record?: boolean): string =>
+  `const HOOK = ${JSON.stringify({ command: hook.command, ...(hook.args && { args: hook.args }), ...(event && { event }), ...(record && { record }) })};\n${WRAPPER_TEMPLATE}`;
 
 const CURSOR_TOOLS: Record<string, string> = {
   Bash: "Shell",
@@ -295,7 +313,7 @@ const REASON_TWICE =
   "the command runs twice when `.claude/settings.json` also holds it and Third-Party Imports is on";
 const REASON_EDIT = "Cursor `Write` covers both creates and edits";
 const REASON_READ =
-  "the Read range is recovered from the content line count, unverified in Cursor";
+  "enforced on `beforeReadFile` for reads that passed `preToolUse` first, with the range recovered from the content line count; Cursor's own whole-file reads for edits are allowed; the event order is unverified";
 const REASON_STAR = "Cursor tool names other than `Shell` reach the script unrenamed";
 const REASON_HOOKS_REFUSED =
   "`.cursor/hooks.json` or the formatter runner already exists with different content; this formatter was not written";
@@ -356,10 +374,10 @@ function exportHooks(
   const readEntries: Array<Record<string, unknown>> = [];
   const eventEntries: Record<string, Array<Record<string, unknown>>> = {};
   let written = 0;
-  const emit = (hook: Hook, target: Array<Record<string, unknown>>, matcher?: string, event?: string): void => {
+  const emit = (hook: Hook, target: Array<Record<string, unknown>>, matcher?: string, event?: string, record?: boolean): void => {
     written += 1;
     const wrapper = path.join(hooksDir, `harnessport-guard-${written}.mjs`);
-    if (writeIfNotDry(wrapper, wrapperSource(hook, event), ctx)) files.push(wrapper);
+    if (writeIfNotDry(wrapper, wrapperSource(hook, event, record), ctx)) files.push(wrapper);
     target.push({
       command: userLevel ? `node "${wrapper}"` : `node ${path.relative(rootDir, wrapper)}`,
       ...(matcher && { matcher }),
@@ -367,6 +385,8 @@ function exportHooks(
       ...(hook.failClosed && { failClosed: true }),
     });
   };
+  // The marker recorder never runs the Claude command, so it carries no timeout or failClosed.
+  const emitRecorder = (hook: Hook): void => emit({ ...hook, timeout: undefined, failClosed: false }, entries, "Read", undefined, true);
 
   for (const hook of config.hooks) {
     const spec = HOOK_EVENTS[hook.event];
@@ -429,7 +449,10 @@ function exportHooks(
       const isShell = rest.matcher === "Shell";
       emit(hook, isShell ? shellEntries : entries, isShell ? undefined : rest.matcher);
     }
-    if (hasRead) emit(hook, readEntries);
+    if (hasRead) {
+      emit(hook, readEntries);
+      emitRecorder(hook);
+    }
     const reasons = [
       ...rest.reasons,
       ...(hasRead ? [REASON_READ] : []),

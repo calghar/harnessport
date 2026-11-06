@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Wrapped Cursor `Read` guardrails on `beforeReadFile`, with the read range recovered from the content line count
+- Limited Cursor `Read` guardrails to reads that passed `preToolUse` first, so Cursor's own whole-file reads for edits are allowed
 - Wrapped Cursor `Write`, `Edit` and `MultiEdit` guardrails on `preToolUse` instead of writing nothing
 - Changed a matcher that mixes tokens such as `Bash|Read` to write one wrapper per Cursor event
 - Changed Cursor Shell guardrails to register on `beforeShellExecution`, so an `ask` decision prompts the user instead of denying

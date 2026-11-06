@@ -1,13 +1,13 @@
 Feature: cursor-native-hooks
 
   # Requirement: A Read or Write guardrail is wrapped on its Cursor event
-  # A `PreToolUse` hook of dialect `claude` whose matcher has a `Read` token SHALL get a wrapper registered under `beforeReadFile`. Its `Write`, `Edit` and `MultiEdit` tokens SHALL map to a `preToolUse` wrapper with matcher `Write`. A matcher mixing tokens SHALL write one wrapper per Cursor event it needs, numbered over written wrappers in config order, and carry `timeout` and `failClosed` to each. The hook SHALL yield one item of kind `hook`. A hook whose matcher has no `Read` token and a `Bash` token, or has no matcher or `*`, SHALL be exported as before.
+  # A `PreToolUse` hook of dialect `claude` whose matcher has a `Read` token SHALL get a wrapper registered under `beforeReadFile` and a marker-recording wrapper under `preToolUse` with matcher `Read`; `beforeReadFile` enforces only reads whose `tool_use_id` was recorded. Its `Write`, `Edit` and `MultiEdit` tokens SHALL map to a `preToolUse` wrapper with matcher `Write`. A matcher mixing tokens SHALL write one wrapper per Cursor event it needs, numbered over written wrappers in config order, and carry `timeout` and `failClosed` to each. The hook SHALL yield one item of kind `hook`. A hook whose matcher has no `Read` token and a `Bash` token, or has no matcher or `*`, SHALL be exported as before.
 
   @requirement_a_read_or_write_guardrail_is_wrapped_on_its_cursor_event
   Scenario: A Read and Write guardrail writes one wrapper per event
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Read|Write", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {preToolUse: [{command: "node .cursor/hooks/harnessport-guard-1.mjs", matcher: "Write"}], beforeReadFile: [{command: "node .cursor/hooks/harnessport-guard-2.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {preToolUse: [{command: "node .cursor/hooks/harnessport-guard-1.mjs", matcher: "Write"}, {command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read"}], beforeReadFile: [{command: "node .cursor/hooks/harnessport-guard-2.mjs"}]}}`
     And the file `.cursor/hooks/harnessport-guard-2.mjs` exists and contains the string `./guard.sh`
     And the item of kind `hook` named `PreToolUse` has status `lossy` and its reason names `content line count`
 
@@ -32,7 +32,7 @@ Feature: cursor-native-hooks
   Scenario: A Bash and Read guardrail writes a shell wrapper and a read wrapper
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash|Read", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeShellExecution: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}], beforeReadFile: [{command: "node .cursor/hooks/harnessport-guard-2.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeShellExecution: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}], beforeReadFile: [{command: "node .cursor/hooks/harnessport-guard-2.mjs"}], preToolUse: [{command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read"}]}}`
     And the item of kind `hook` named `PreToolUse` has status `lossy` and its reason names `content line count`
 
   # Requirement: Other Claude hook events are wrapped on their Cursor events

@@ -88,3 +88,40 @@ describe("Copilot and Codex hook export", () => {
     expect(items.filter((i) => i.kind === "hook").map((i) => i.status)).toEqual(["exact", "blocked"]);
   });
 });
+
+describe("Plain Claude hooks and generateDropItems callers", () => {
+  const rich: HarnessConfig = {
+    ...withHooks([{ event: "PostToolUse", matcher: "Bash", command: "./log.sh" }]),
+    rules: [{ content: "Be careful.", source: "rules.md" }],
+    agents: [{ name: "reviewer", body: "AGENT-BODY-MARKER", description: "Reviews" }],
+    skills: [{ name: "testing", body: "Test it." }],
+    commands: [{ name: "ship", body: "Ship it." }],
+    mcpServers: [{ name: "fs", type: "stdio", command: "npx", args: ["mcp-fs"] }],
+  };
+
+  it("emits a plain command hook as {type, command} only", () => {
+    const out = tmpDir();
+    claudeConverter.export(out, withHooks([{ event: "PreToolUse", matcher: "Bash", command: "./g.sh" }]));
+    expect(readSettings(out).hooks.PreToolUse).toEqual([
+      { matcher: "Bash", hooks: [{ type: "command", command: "./g.sh" }] },
+    ]);
+  });
+
+  it("cursor reports no agent, skill, command or mcp item as dropped", () => {
+    const out = tmpDir();
+    const { items } = cursorConverter.export(out, rich, {});
+    expect(items.filter((i) => ["agent", "skill", "command", "mcp"].includes(i.kind)).map((i) => i.status))
+      .toEqual(["exact", "exact", "exact", "exact"]);
+    expect(fs.existsSync(path.join(out, ".cursor/mcp.json"))).toBe(true);
+  });
+
+  it("codex drops agents, commands and mcp servers, and writes no agent body", () => {
+    const out = tmpDir();
+    const { items } = codexConverter.export(out, rich, {});
+    for (const kind of ["agent", "command", "mcp"] as const) {
+      expect(items.find((i) => i.kind === kind)?.status, kind).toBe("dropped");
+    }
+    expect(items.find((i) => i.kind === "hook")?.status).toBe("exact");
+    expect(fs.readFileSync(path.join(out, "AGENTS.md"), "utf-8")).not.toContain("AGENT-BODY-MARKER");
+  });
+});

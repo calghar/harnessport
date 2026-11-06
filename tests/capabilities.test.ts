@@ -112,4 +112,17 @@ describe("Requirement: A guardrail a target cannot write or enforce is blocked",
     expect(exitCode(items)).toBe(2);
   });
 
+  it("A claude PostToolUse hook exported to opencode is dropped", () => {
+    const items = exportHook("PostToolUse");
+    const [item] = itemsOfKind(items, "hook");
+    expect(item.name).toBe("PostToolUse");
+    expect(item.status).toBe("dropped");
+    expect(exitCode(items)).toBe(0);
+  });
+});
+
+describe("Requirement: Cursor converts hooks through its wrapper", () => {
+  it("declares hook as full", () => {
+    expect(cursorConverter.capabilities.hook).toBe("full");
+  });
 });

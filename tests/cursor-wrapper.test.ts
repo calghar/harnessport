@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { claudeConverter } from "../src/converters/claude.js";
 import { cursorConverter } from "../src/converters/cursor.js";
 import type { ExportOptions } from "../src/converters/types.js";
 import type { Hook, HarnessConfig } from "../src/schema.js";
@@ -91,6 +92,23 @@ describe("Cursor hook export", () => {
     const again = cursorConverter.export(dir, config, {});
     expect([read(dir, ".cursor/hooks.json"), read(dir, WRAPPER)]).toEqual(before);
     expect(again.items.some((i) => i.status === "blocked")).toBe(false);
+  });
+
+  it("converts a claude export into hooks.json and the wrapper, byte-identical on re-run", () => {
+    const src = tmpDir();
+    fs.mkdirSync(path.join(src, ".claude"));
+    fs.writeFileSync(path.join(src, ".claude/settings.json"), JSON.stringify({
+      hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "./guard.sh", timeout: 10, onFailure: "block" }] }] },
+    }));
+    const config = claudeConverter.import(src);
+    const out = tmpDir();
+    cursorConverter.export(out, config, {});
+    expect(JSON.parse(read(out, ".cursor/hooks.json")).hooks.preToolUse[0])
+      .toEqual({ command: `node ${WRAPPER}`, matcher: "Shell", timeout: 10, failClosed: true });
+    expect(read(out, WRAPPER)).toContain("./guard.sh");
+    const before = [read(out, ".cursor/hooks.json"), read(out, WRAPPER)];
+    cursorConverter.export(out, config, {});
+    expect([read(out, ".cursor/hooks.json"), read(out, WRAPPER)]).toEqual(before);
   });
 
   it("maps supported matchers and blocks unsupported ones without writing", () => {

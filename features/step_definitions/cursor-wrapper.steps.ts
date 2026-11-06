@@ -289,6 +289,10 @@ Then(
   },
 );
 
+Then(/^the wrapper stderr contains `([^`]+)`$/, function (this: CursorWorld, stderr: string) {
+  assert.ok(this.run.stderr.includes(stderr), this.run.stderr);
+});
+
 Then(/^the wrapper exits `(\d+)` and prints nothing on stdout$/, function (this: CursorWorld, code: string) {
   assert.equal(this.run.status, Number(code), JSON.stringify(this.run));
   assert.equal(this.run.stdout, "");

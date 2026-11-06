@@ -36,7 +36,7 @@ describe("Cursor wrapper", () => {
       ["a JSON deny exits 2 with the reason", printing(JSON.stringify({ hookSpecificOutput: { permissionDecision: "deny", permissionDecisionReason: "blocked by policy" } })), 2, "blocked by policy"],
       ["a legacy block exits 2", printing(JSON.stringify({ decision: "block", reason: "legacy" })), 2, "legacy"],
       ["ask is treated as deny", printing(JSON.stringify({ hookSpecificOutput: { permissionDecision: "ask" } })), 2, ""],
-      ["non-JSON output exits 2", printing("ok"), 2, ""],
+      ["JSON that is not an object exits 2", printing("[1]"), 2, ""],
       ["a crash exits 1", printing("", "", 1), 1, ""],
       ["an odd exit code exits 1", printing("", "", 7), 1, ""],
     ];
@@ -55,6 +55,13 @@ describe("Cursor wrapper", () => {
     expect(JSON.parse(runWith(printing(JSON.stringify(updated))).stdout)).toEqual({ permission: "allow", updated_input: { command: "ls -la" } });
     expect(runWith(undefined, SHELL, { command: "./does-not-exist.sh" }).status).toBe(1);
   }, 60_000);
+
+  it("allows non-JSON stdout and forwards it to stderr", () => {
+    const r = runWith(printing("Warning: x"));
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ permission: "allow" });
+    expect(r.stderr).toContain("Warning: x");
+  });
 
   it("renames Shell to Bash and leaves other tool names unchanged", () => {
     const stdinStub = 'import { readFileSync, writeFileSync } from "node:fs";writeFileSync("seen.json", readFileSync(0, "utf-8"));';

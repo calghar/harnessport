@@ -228,7 +228,7 @@ const WRAPPER_TEMPLATE = [
   "  const allow = (updated) => { process.stdout.write(JSON.stringify(updated ? { permission: \"allow\", updated_input: updated } : { permission: \"allow\" })); };",
   "  if (text === \"\") return allow();",
   "  let out;",
-  "  try { out = JSON.parse(text); } catch (e) { return end(2, \"harnessport-guard: command output is not JSON\"); }",
+  "  try { out = JSON.parse(text); } catch (e) { process.stderr.write(text + \"\\n\"); return allow(); }",
   "  if (out === null || typeof out !== \"object\" || Array.isArray(out)) return end(2, \"harnessport-guard: command output is not a JSON object\");",
   "  const hso = out.hookSpecificOutput && typeof out.hookSpecificOutput === \"object\" ? out.hookSpecificOutput : {};",
   "  const decisions = [hso.permissionDecision, out.permissionDecision, out.decision].filter((d) => d !== undefined);",

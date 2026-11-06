@@ -17,6 +17,7 @@ import {
   exportRulesToFile,
   generateDropItems,
   exactItems,
+  hookStatus,
   permissionStatus,
   writeIfNotDry,
   takeReadProblems,
@@ -62,15 +63,51 @@ function parseCodexHooksObject(obj: Record<string, unknown>): Hook[] {
 
 // --- Export ---
 
+// Codex hooks stay Claude-shaped, so Bash is the only tool name written.
+const CODEX_TOOL = "Bash";
+
+/** Why Codex cannot take this hook, or undefined when it can. */
+function codexHookLimitation(hook: Hook): string | undefined {
+  const matcher = hook.matcher ?? "";
+  if (matcher !== "*" && matcher !== "") {
+    const token = matcher.split("|").find((t) => t !== CODEX_TOOL);
+    if (token !== undefined) return `has no verified matcher for \`${token}\` (only ${CODEX_TOOL} is written)`;
+  }
+  if (hook.failClosed) return "has no verified fail-closed field";
+  if (hook.args) return "has no verified exec-form args field";
+  return undefined;
+}
+
 function exportHooks(
   rootDir: string,
   hooks: Hook[],
   ctx: WriteContext,
-): string[] {
-  if (hooks.length === 0) return [];
+): { files: string[]; items: FidelityItem[] } {
+  const items: FidelityItem[] = [];
+  const written: Hook[] = [];
+  for (const hook of hooks) {
+    const limitation = codexHookLimitation(hook);
+    if (limitation) {
+      items.push(hookStatus(hook, "Codex CLI", limitation));
+      continue;
+    }
+    written.push(hook);
+    items.push(
+      hook.timeout === undefined
+        ? { phase: "export", kind: "hook", name: hook.event, status: "exact" }
+        : {
+            phase: "export",
+            kind: "hook",
+            name: hook.event,
+            status: "lossy",
+            reason: "Codex CLI has no verified hook timeout field, so the timeout was not written",
+          },
+    );
+  }
+  if (written.length === 0) return { files: [], items };
 
   // Group hooks into Codex format: { "Event": [ { matcher?: "...", hooks: [ ... ] } ] }
-  const grouped = hooks.reduce<Record<string, Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>>>((acc, hook) => {
+  const grouped = written.reduce<Record<string, Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>>>((acc, hook) => {
     if (!acc[hook.event]) acc[hook.event] = [];
     const matcherKey = hook.matcher ?? "";
     let group = acc[hook.event].find((g) => (g.matcher ?? "") === matcherKey);
@@ -83,8 +120,8 @@ function exportHooks(
   }, {});
 
   const filePath = path.join(rootDir, ".codex", "hooks.json");
-  if (!writeIfNotDry(filePath, `${JSON.stringify({ hooks: grouped }, null, 2)}\n`, ctx)) return [];
-  return [filePath];
+  const wrote = writeIfNotDry(filePath, `${JSON.stringify({ hooks: grouped }, null, 2)}\n`, ctx);
+  return { files: wrote ? [filePath] : [], items };
 }
 
 // --- Converter ---
@@ -151,6 +188,7 @@ export const codexConverter: Converter = {
   ): ExportResult {
     const ctx = newWriteContext(options);
     const items: FidelityItem[] = [...config.items];
+    const hookExport = exportHooks(rootDir, config.hooks, ctx);
     const filesWritten: string[] = [
       ...exportRulesToFile(
         path.join(rootDir, "AGENTS.md"),
@@ -162,7 +200,7 @@ export const codexConverter: Converter = {
         config.skills,
         ctx,
       ),
-      ...exportHooks(rootDir, config.hooks, ctx),
+      ...hookExport.files,
     ];
 
     items.push(
@@ -177,7 +215,7 @@ export const codexConverter: Converter = {
       }),
       ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
       ...exactItems("skill", config.skills.map((s) => s.name)),
-      ...exactItems("hook", config.hooks.map((h) => h.event)),
+      ...hookExport.items,
       ...config.permissions.map((p) =>
         permissionStatus(p, codexConverter.permissionActions, "Codex CLI"),
       ),

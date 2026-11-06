@@ -17,7 +17,7 @@ against what that converter actually reports converting. Run `npm run docs:matri
 | Commands    | yes         | yes      | yes    | yes     | -          |
 | MCP Servers | yes         | yes      | yes    | yes     | user-level |
 | Permissions | yes         | yes      | -      | -       | -          |
-| Hooks       | yes         | -        | -      | yes     | yes        |
+| Hooks       | yes         | -        | yes    | yes     | yes        |
 | Formatters  | yes         | yes      | -      | -       | -          |
 
 - **yes** — imported and exported
@@ -120,6 +120,12 @@ the target harness has no way to express it, the entry is refused and reported r
 downgraded — there is no flag that overrides this. The rest of the conversion still completes, so
 you get your files plus an accurate account of what did not carry.
 
+**Hook fidelity.** A guardrail is a hook on `PreToolUse`, `PermissionRequest` or `UserPromptSubmit`.
+A target that cannot write or enforce a guardrail reports it `blocked`, and `convert` exits `2`.
+Any other hook it cannot write is `dropped`, and the exit code is unchanged. Cursor runs hooks
+through Node wrappers. The command runs twice when `.claude/settings.json` also holds it and
+Cursor's Third-Party Imports is on.
+
 ### Check the report rather than trusting it
 
 `verify` converts into a temporary directory, reads the result back, and reports what did not
@@ -214,7 +220,7 @@ reason rather than disappearing. See [Fidelity reporting](#fidelity-reporting).
 | Skills | `.claude/skills/*/SKILL.md` | `.opencode/skills/*/SKILL.md` | `.cursor/skills/*/SKILL.md` | `.github/skills/*/SKILL.md` | `.codex/skills/*/SKILL.md` |
 | Commands | `.claude/commands/*.md` | `.opencode/commands/*.md` | `.cursor/commands/*.md` | `.github/prompts/*.prompt.md` | - |
 | MCP | `.mcp.json` | `opencode.json` | `.cursor/mcp.json` | `.copilot/mcp-config.json` | `~/.codex/config.toml` |
-| Hooks | `.claude/settings.json` | - | - | `.github/hooks/*.json` | `.codex/hooks.json` |
+| Hooks | `.claude/settings.json` | - | `.cursor/hooks.json` (Node wrappers) | `.github/hooks/*.json` (`version: 1`) | `.codex/hooks.json` |
 
 ## Architecture
 

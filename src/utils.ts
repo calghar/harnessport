@@ -36,6 +36,25 @@ export function parseFrontmatter(raw: string): FrontmatterResult {
   return { data, content: raw.slice(match[0].length).trim() };
 }
 
+/** Read and parse a markdown file; invalid YAML frontmatter is reported as `blocked` and the file skipped. */
+export function readMarkdownFile(
+  filePath: string,
+  kind: FidelityItem["kind"],
+): FrontmatterResult | undefined {
+  const raw = readFileIfExists(filePath);
+  if (raw === undefined) return undefined;
+  try {
+    return parseFrontmatter(raw);
+  } catch (err) {
+    recordReadProblem(
+      filePath,
+      `${path.basename(filePath)} has invalid YAML frontmatter: ${err instanceof Error ? err.message : String(err)}`,
+      kind,
+    );
+    return undefined;
+  }
+}
+
 export function serializeFrontmatter(
   data: Record<string, unknown>,
   body: string,
@@ -163,10 +182,14 @@ export function takeReadProblems(): FidelityItem[] {
   return readProblems.splice(0, readProblems.length);
 }
 
-function recordReadProblem(filePath: string, reason: string): void {
+function recordReadProblem(
+  filePath: string,
+  reason: string,
+  kind: FidelityItem["kind"] = "rule",
+): void {
   readProblems.push({
     phase: "import",
-    kind: "rule",
+    kind,
     name: filePath,
     status: "blocked",
     reason,
@@ -345,8 +368,19 @@ export function uniqueSlugs(names: string[]): string[] {
 /**
  * Parse a single SKILL.md file into a Skill object.
  */
-function parseSkillMd(raw: string, fallbackName: string): Skill {
-  const { data, content } = parseFrontmatter(raw);
+function parseSkillMd(raw: string, fallbackName: string, filePath: string): Skill | undefined {
+  let parsed: FrontmatterResult;
+  try {
+    parsed = parseFrontmatter(raw);
+  } catch (err) {
+    recordReadProblem(
+      filePath,
+      `${path.basename(filePath)} has invalid YAML frontmatter: ${err instanceof Error ? err.message : String(err)}`,
+      "skill",
+    );
+    return undefined;
+  }
+  const { data, content } = parsed;
   return {
     name: getStringOrFallback(data, "name", fallbackName),
     description: getString(data, "description"),
@@ -362,14 +396,21 @@ export function importSkillsFromDir(
   skillsDir: string,
   options: { nested?: boolean; flatMd?: boolean } = {},
 ): Skill[] {
+  const parseOne = (raw: string, fallback: string, filePath: string): Skill[] => {
+    const skill = parseSkillMd(raw, fallback, filePath);
+    return skill ? [skill] : [];
+  };
+
   const fromSubdirs = listSubdirs(skillsDir).flatMap((subDir) => {
-    const main = readFileIfExists(path.join(subDir, "SKILL.md"));
-    const results = main ? [parseSkillMd(main, path.basename(subDir))] : [];
+    const mainPath = path.join(subDir, "SKILL.md");
+    const main = readFileIfExists(mainPath);
+    const results = main ? parseOne(main, path.basename(subDir), mainPath) : [];
 
     if (options.nested) {
       const nested = listSubdirs(subDir).flatMap((nestedDir) => {
-        const nestedMd = readFileIfExists(path.join(nestedDir, "SKILL.md"));
-        return nestedMd ? [parseSkillMd(nestedMd, path.basename(nestedDir))] : [];
+        const nestedPath = path.join(nestedDir, "SKILL.md");
+        const nestedMd = readFileIfExists(nestedPath);
+        return nestedMd ? parseOne(nestedMd, path.basename(nestedDir), nestedPath) : [];
       });
       results.push(...nested);
     }
@@ -378,9 +419,9 @@ export function importSkillsFromDir(
   });
 
   const fromFlatMd = options.flatMd
-    ? listMdFiles(skillsDir).map((filePath) => {
+    ? listMdFiles(skillsDir).flatMap((filePath) => {
         const raw = fs.readFileSync(filePath, "utf-8");
-        return parseSkillMd(raw, path.basename(filePath, ".md"));
+        return parseOne(raw, path.basename(filePath, ".md"), filePath);
       })
     : [];
 
@@ -612,9 +653,10 @@ export function generateDropItems(
   if (unsupported.mcpServers && config.mcpServers.length > 0) {
     drop("mcp", config.mcpServers.map((s) => s.name), unsupported.mcpServers);
   }
-  if (unsupported.hooks) {
+  const hooksReason = unsupported.hooks;
+  if (hooksReason) {
     items.push(
-      ...config.hooks.map((h) => hookStatus(h, unsupported.targetName ?? "The target", unsupported.hooks!)),
+      ...config.hooks.map((h) => hookStatus(h, unsupported.targetName ?? "The target", hooksReason)),
     );
   }
   if (unsupported.formatters) {

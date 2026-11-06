@@ -7,9 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Reported a guardrail hook (`PreToolUse`, `PermissionRequest`, `UserPromptSubmit`) that a target
+  cannot write or enforce as `blocked`, which exits `2`
+- Changed the Copilot hooks file to `{version: 1, hooks}` with `matcher` and `timeoutSec`, so
+  conversions to Copilot made with 0.2.1 need a re-run
+- Carried Claude `onFailure: "block"` as `failClosed`, and blocked a `failClosed` guardrail on
+  targets that cannot fail closed
+
+### Added
+
+- Exported hooks to Cursor as `.cursor/hooks.json` through Node wrappers
+
 ### Changed
 
-- Reported `PreToolUse` guardrails on OpenCode as `blocked` and exited `2`, instead of dropping them with a warning; harnessport does not generate the OpenCode plugin that enforces them
+- Changed the Claude formatter hook to read the edited path from stdin through
+  `.claude/hooks/harnessport-format.mjs`, and kept importing the earlier `$FILEPATH` form
+- Reported `PreToolUse` guardrails on OpenCode as `blocked` and exited `2`, instead of dropping them
+  with a warning, because harnessport does not generate the OpenCode plugin that enforces them
+
+### Fixed
+
+- Fixed an import stopping on one file with invalid YAML frontmatter; the file is reported as `blocked` and the rest of the import continues
+- Fixed the Cursor wrapper command for a home-directory target to use a quoted absolute path, so global hooks run from any project
 
 ### Removed
 

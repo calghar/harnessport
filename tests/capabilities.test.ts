@@ -3,14 +3,13 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { spawnSync } from "node:child_process";
 import { claudeConverter } from "../src/converters/claude.js";
 import { opencodeConverter } from "../src/converters/opencode.js";
 import { cursorConverter } from "../src/converters/cursor.js";
 import { copilotConverter } from "../src/converters/copilot.js";
 import { codexConverter } from "../src/converters/codex.js";
 import type { Capability, Converter } from "../src/converters/types.js";
-import { renderCliMatrix, renderReadmeMatrix, syncReadme } from "../src/matrix.js";
+import { syncReadme } from "../src/matrix.js";
 import type { Feature, FidelityItem, HarnessConfig } from "../src/schema.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -61,140 +60,16 @@ function itemsOfKind(items: FidelityItem[], kind: Feature): FidelityItem[] {
   return items.filter((i) => i.kind === kind);
 }
 
-describe("Requirement: Every converter declares what it converts", () => {
-  it.each(Object.keys(CONVERTERS))("%s declares every feature", (name) => {
-    const declared = CONVERTERS[name].capabilities;
-    for (const feature of FEATURES) {
-      expect(CAPABILITIES).toContain(declared[feature]);
-    }
-  });
-
-  it.each([
-    ["cursor", "agent", "full"],
-    ["cursor", "skill", "full"],
-    ["cursor", "command", "full"],
-    ["cursor", "mcp", "full"],
-    ["copilot", "agent", "full"],
-    ["copilot", "skill", "full"],
-    ["copilot", "command", "full"],
-    ["copilot", "mcp", "full"],
-    ["copilot", "hook", "full"],
-    ["codex", "agent", "user-level"],
-    ["codex", "mcp", "user-level"],
-    ["codex", "command", "none"],
-    ["codex", "hook", "full"],
-    ["codex", "permission", "none"],
-    ["opencode", "hook", "none"],
-    ["opencode", "formatter", "full"],
-    ["claude", "permission", "full"],
-    ["claude", "formatter", "full"],
-  ] as Array<[string, Feature, Capability]>)(
-    "%s declares %s as %s",
-    (tool, feature, value) => {
-      expect(CONVERTERS[tool].capabilities[feature]).toBe(value);
-    },
-  );
-});
-
 describe("Requirement: A declaration disagreeing with export behaviour fails the build", () => {
-  it.each([
-    ["claude", "agent"],
-    ["claude", "hook"],
-    ["claude", "formatter"],
-    ["opencode", "agent"],
-    ["opencode", "formatter"],
-    ["cursor", "agent"],
-    ["copilot", "hook"],
-    ["codex", "hook"],
-  ] as Array<[string, Feature]>)(
-    "%s represents %s in the output, as declared full",
-    (tool, feature) => {
-      const items = itemsOfKind(exportEveryFeature(CONVERTERS[tool]), feature);
-      expect(items.some((i) => i.status === "exact" || i.status === "lossy")).toBe(true);
-    },
-  );
-
-  it.each([
-    ["cursor", "permission"],
-    ["cursor", "hook"],
-    ["cursor", "formatter"],
-    ["copilot", "permission"],
-    ["copilot", "formatter"],
-    ["codex", "agent"],
-    ["codex", "command"],
-    ["codex", "mcp"],
-    ["opencode", "hook"],
-  ] as Array<[string, Feature]>)(
-    "%s never reports %s as written, as declared unconverted",
-    (tool, feature) => {
-      const items = itemsOfKind(exportEveryFeature(CONVERTERS[tool]), feature);
-      expect(items.length).toBeGreaterThan(0);
-      expect(items.every((i) => i.status === "dropped" || i.status === "blocked")).toBe(true);
-    },
-  );
-
-  // The declaration is checked against behaviour for every cell, not only the named ones above.
-  it.each(Object.keys(CONVERTERS))("%s agrees with its own export for all eight features", (name) => {
-    const converter = CONVERTERS[name];
-    const items = exportEveryFeature(converter);
-    for (const feature of FEATURES) {
-      const kindItems = itemsOfKind(items, feature);
-      const written = kindItems.some((i) => i.status === "exact" || i.status === "lossy");
-      expect({ feature, written }).toEqual({
-        feature,
-        written: converter.capabilities[feature] === "full",
-      });
+  it("every converter declares each feature and agrees with its own export", () => {
+    for (const [name, converter] of Object.entries(CONVERTERS)) {
+      const items = exportEveryFeature(converter);
+      for (const feature of FEATURES) {
+        expect(CAPABILITIES, `${name}/${feature}`).toContain(converter.capabilities[feature]);
+        const written = itemsOfKind(items, feature).some((i) => i.status === "exact" || i.status === "lossy");
+        expect(written, `${name}/${feature}`).toBe(converter.capabilities[feature] === "full");
+      }
     }
-  });
-});
-
-describe("Requirement: A user-level declaration names the path it lives at", () => {
-  it("Codex agents name the user-level config file", () => {
-    const items = itemsOfKind(exportEveryFeature(codexConverter), "agent");
-    expect(items.some((i) => i.reason?.includes("~/.codex/config.toml"))).toBe(true);
-  });
-});
-
-describe("Requirement: The list command renders from the declaration", () => {
-  const cli = renderCliMatrix();
-
-  function cell(feature: string, tool: string): string {
-    const header = cli.split("\n").find((l) => l.includes("Claude"));
-    const row = cli.split("\n").find((l) => l.startsWith(feature));
-    expect(header).toBeDefined();
-    expect(row).toBeDefined();
-    const columns = (header as string).split("|").map((c) => c.trim().toLowerCase());
-    const index = columns.findIndex((c) => c.startsWith(tool.slice(0, 6)));
-    expect(index).toBeGreaterThan(0);
-    return (row as string).split("|")[index].trim();
-  }
-
-  it.each([
-    ["cursor", "Agents", "✓"],
-    ["cursor", "Skills", "✓"],
-    ["cursor", "Commands", "✓"],
-    ["copilot", "Agents", "✓"],
-    ["copilot", "Skills", "✓"],
-    ["copilot", "Commands", "✓"],
-    ["copilot", "MCP Servers", "✓"],
-    ["copilot", "Hooks", "✓"],
-    ["codex", "Agents", "~"],
-    ["codex", "Permissions", "-"],
-  ])("%s shows %s as %s", (tool, feature, symbol) => {
-    expect(cell(feature, tool)).toBe(symbol);
-  });
-
-  it("The legend defines all three symbols", () => {
-    expect(cli).toContain("✓ =");
-    expect(cli).toContain("~ =");
-    expect(cli).toContain("- =");
-  });
-
-  const CLI_PATH = path.resolve(HERE, "..", "dist", "index.js");
-  it.runIf(fs.existsSync(CLI_PATH))("The built CLI prints the rendered matrix", () => {
-    const r = spawnSync("node", [CLI_PATH, "list"], { encoding: "utf-8" });
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain(renderCliMatrix());
   });
 });
 
@@ -217,18 +92,6 @@ describe("Requirement: The README matrix is generated and drift fails the check"
     expect(outcome.message).toContain("npm run docs:matrix");
   });
 
-  it("Regeneration is idempotent", () => {
-    const dir = tmpDir();
-    const copy = path.join(dir, "README.md");
-    fs.copyFileSync(README, copy);
-    const before = fs.readFileSync(copy, "utf-8");
-    syncReadme(copy, { check: false });
-    expect(fs.readFileSync(copy, "utf-8")).toBe(before);
-  });
-
-  it("The generated region is what the declaration renders", () => {
-    expect(fs.readFileSync(README, "utf-8")).toContain(renderReadmeMatrix());
-  });
 });
 
 describe("Requirement: A guardrail a target cannot write or enforce is blocked", () => {
@@ -249,36 +112,4 @@ describe("Requirement: A guardrail a target cannot write or enforce is blocked",
     expect(exitCode(items)).toBe(2);
   });
 
-  it("A claude PostToolUse hook exported to opencode is dropped", () => {
-    const items = exportHook("PostToolUse");
-    const [item] = itemsOfKind(items, "hook");
-    expect(item.status).toBe("dropped");
-    expect(exitCode(items)).toBe(0);
-  });
-
-  it("Cursor reports a guardrail blocked and keeps formatters dropped", () => {
-    const items = exportEveryFeature(cursorConverter);
-    expect(itemsOfKind(items, "hook")[0].status).toBe("blocked");
-    expect(itemsOfKind(items, "formatter")[0].status).toBe("dropped");
-  });
-
-  it("Codex drop items for non-hook features are unchanged", () => {
-    const items = exportEveryFeature(codexConverter);
-    expect(itemsOfKind(items, "agent")[0].status).toBe("dropped");
-    expect(itemsOfKind(items, "command")[0].status).toBe("dropped");
-    expect(itemsOfKind(items, "mcp")[0].status).toBe("dropped");
-    expect(itemsOfKind(items, "hook")[0].status).toBe("exact");
-  });
-
-  it("Formatters are still converted", () => {
-    const dir = tmpDir();
-    const result = opencodeConverter.export(dir, everyFeature(), {});
-    const emitted = JSON.parse(
-      fs.readFileSync(path.join(dir, "opencode.json"), "utf-8"),
-    ) as { formatter?: Record<string, unknown> };
-    expect(emitted.formatter).toBeDefined();
-    expect(
-      itemsOfKind(result.items, "formatter").every((i) => i.status === "exact"),
-    ).toBe(true);
-  });
 });

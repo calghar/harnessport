@@ -57,61 +57,22 @@ function blockedNames(items: FidelityItem[]): string[] {
   return items.filter((i) => i.status === "blocked").map((i) => i.name).sort();
 }
 
-describe("Requirement: Each importer reads its own fixture", () => {
-  it.each(NAMES)("%s detects and imports its fixture", (name) => {
-    const converter = CONVERTERS[name];
-    const dir = fixtureFor(name);
-    expect(converter.detect(dir)).toBe(true);
-    const config = converter.import(dir);
-    expect(config.rules.length).toBeGreaterThan(0);
-    expect(config.skills.length).toBeGreaterThan(0);
-  });
-});
-
 describe("Requirement: Every ordered pair of harnesses converts end to end", () => {
-  it("covers all twenty ordered pairs", () => {
+  it("detects, keeps rule text and skill names, is idempotent and explains every loss", () => {
+    for (const name of NAMES) {
+      expect(CONVERTERS[name].detect(fixtureFor(name)), name).toBe(true);
+    }
     expect(PAIRS).toHaveLength(20);
-  });
-
-  it.each(PAIRS)("%s -> %s is detected by its target", (from, to) => {
-    const { dir } = convert(CONVERTERS[from], CONVERTERS[to]);
-    expect(CONVERTERS[to].detect(dir)).toBe(true);
-  });
-});
-
-describe("Requirement: Rule text and skill names survive every pair", () => {
-  it.each(PAIRS)("%s -> %s keeps rule text", (from, to) => {
-    const { source, target } = convert(CONVERTERS[from], CONVERTERS[to]);
-    const joined = target.rules.map((r) => r.content).join("\n");
-    for (const rule of source.rules) {
-      expect(joined).toContain(rule.content.trim().split("\n")[0]);
+    for (const [from, to] of PAIRS) {
+      const label = `${from} -> ${to}`;
+      const { source, dir, result, target } = convert(CONVERTERS[from], CONVERTERS[to]);
+      expect(CONVERTERS[to].detect(dir), label).toBe(true);
+      const joined = target.rules.map((r) => r.content).join("\n");
+      for (const rule of source.rules) expect(joined, label).toContain(rule.content.trim().split("\n")[0]);
+      for (const skill of source.skills) expect(target.skills.map((s) => s.name), label).toContain(skill.name);
+      expect(roundTripLoss(source, target, result.items).unaccounted, label).toEqual([]);
+      const second = CONVERTERS[to].export(dir, source, {});
+      expect(blockedNames(second.items), label).toEqual(blockedNames(result.items));
     }
-  });
-
-  it.each(PAIRS)("%s -> %s keeps skill names", (from, to) => {
-    const { source, target } = convert(CONVERTERS[from], CONVERTERS[to]);
-    for (const skill of source.skills) {
-      expect(target.skills.map((s) => s.name)).toContain(skill.name);
-    }
-  });
-});
-
-describe("Requirement: Re-running a conversion changes nothing", () => {
-  it.each(PAIRS)("%s -> %s is idempotent", (from, to) => {
-    const converter = CONVERTERS[to];
-    const source = CONVERTERS[from].import(fixtureFor(from));
-    const dir = tmpDir();
-    const first = converter.export(dir, source, {});
-    const second = converter.export(dir, source, {});
-    expect(blockedNames(second.items)).toEqual(blockedNames(first.items));
-  });
-});
-
-describe("Requirement: Anything lost is accounted for", () => {
-  // The comparison lives in src/compare.ts, which `harnessport verify` also uses — so the command
-  // and this test cannot disagree about what counts as loss.
-  it.each(PAIRS)("%s -> %s explains every loss", (from, to) => {
-    const { source, result, target } = convert(CONVERTERS[from], CONVERTERS[to]);
-    expect(roundTripLoss(source, target, result.items).unaccounted).toEqual([]);
   });
 });

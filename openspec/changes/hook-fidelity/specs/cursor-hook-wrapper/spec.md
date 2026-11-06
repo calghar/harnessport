@@ -21,6 +21,12 @@ written count SHALL be named in the item reason.
 - **AND** the item of kind `hook` named `PreToolUse` has status `exact` and its reason names `node`
 - **AND** no file `.claude/settings.json` is written
 
+#### Scenario: A user-level target writes absolute wrapper paths
+- **GIVEN** a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh"}` and a home directory passed to the exporter
+- **WHEN** converting from claude to cursor with the target equal to that home directory
+- **THEN** `hooks.preToolUse[0].command` in `.cursor/hooks.json` equals `node "<absolute path>/.cursor/hooks/harnessport-guard-1.mjs"`, with the path in double quotes
+- **AND** converting into any other directory still writes `node .cursor/hooks/harnessport-guard-1.mjs`
+
 #### Scenario: A guardrail without failClosed gets no failClosed key
 - **GIVEN** a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh"}`
 - **WHEN** converting from claude to cursor into a new directory

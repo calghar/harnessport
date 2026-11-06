@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking:** Copilot project MCP servers are read from `.github/mcp.json`; `.copilot/mcp-config.json` is no longer read
 - Allowed a Cursor hook that exits `0` with non-JSON output, and wrote that output to stderr instead of denying the call
+- Stopped writing a Cursor wrapper for a `Read` or `Write` `PreToolUse` hook that Cursor runs from
+  `.claude/settings.json`, and reported any `Read` hook as `lossy` because Cursor drops `offset`
+  and `limit`
 
 ### Fixed
 

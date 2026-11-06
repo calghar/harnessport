@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -156,8 +157,8 @@ describe("Cursor hook export", () => {
 
   it("maps supported matchers and blocks unsupported ones without writing", () => {
     const mapped: Array<[string | undefined, string, string]> = [
-      ["Edit|Write", "Write", "lossy"],
-      ["Bash|Read", "Shell|Read", "exact"],
+      ["Bash|Edit", "Shell|Write", "lossy"],
+      ["Bash|Read", "Shell|Read", "lossy"],
       ["*", "*", "lossy"],
     ];
     for (const [matcher, expected, status] of mapped) {
@@ -173,6 +174,48 @@ describe("Cursor hook export", () => {
       expect(item?.reason).toContain(token);
       expect(fs.existsSync(path.join(dir, ".cursor"))).toBe(false);
     }
+  });
+
+  it("writes nothing for a Read or Write guardrail that Cursor runs natively", () => {
+    const dir = tmpDir();
+    const { items } = cursorConverter.export(dir, configWith(guard({ matcher: "Read|Write" })), {});
+    expect(fs.existsSync(path.join(dir, ".cursor"))).toBe(false);
+    const item = items.find((i) => i.kind === "hook");
+    expect(item?.status).toBe("lossy");
+    expect(item?.reason).toContain("Third-Party Imports");
+    expect(item?.reason).toContain("does not run");
+    expect(item?.reason).toContain("offset or limit");
+  });
+
+  it("numbers wrappers over written hooks only", () => {
+    const dir = tmpDir();
+    cursorConverter.export(dir, configWith(guard({ matcher: "Write" }), guard()), {});
+    expect(fs.existsSync(path.join(dir, WRAPPER))).toBe(true);
+    expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks.preToolUse).toHaveLength(1);
+  });
+
+  it("keeps Bash and no-matcher output byte-identical to before", () => {
+    const sha = (dir: string, rel: string) => createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex");
+    const dir = tmpDir();
+    const { items } = cursorConverter.export(dir, configWith(guard({ command: "./guard.sh" })), {});
+    expect(sha(dir, WRAPPER)).toBe("dcdbe6a2572d8f7ac2db54f3db3b20d0b4663df442000d154a825775ea1f8ab7");
+    expect(sha(dir, ".cursor/hooks.json")).toBe("954581d9f698edf7ee47bdfad1d167caf3b4df03596a669c1a48a852a73473c0");
+    expect(items.find((i) => i.kind === "hook")?.status).toBe("exact");
+
+    const bare = tmpDir();
+    const bareItems = cursorConverter.export(bare, configWith(guard({ matcher: undefined, command: "./guard.sh" })), {}).items;
+    expect(read(bare, WRAPPER)).toBe(read(dir, WRAPPER));
+    expect(JSON.parse(read(bare, ".cursor/hooks.json")).hooks.preToolUse[0].matcher).toBe("*");
+    expect(bareItems.find((i) => i.kind === "hook")?.status).toBe("lossy");
+  });
+
+  it("keeps the wrapper for Bash|Read and reports the lost offset and limit", () => {
+    const dir = tmpDir();
+    const { items } = cursorConverter.export(dir, configWith(guard({ matcher: "Bash|Read" })), {});
+    expect(fs.existsSync(path.join(dir, WRAPPER))).toBe(true);
+    const item = items.find((i) => i.kind === "hook");
+    expect(item?.status).toBe("lossy");
+    expect(item?.reason).toContain("offset or limit");
   });
 
   it("quotes the absolute wrapper path when the home directory contains a space", () => {

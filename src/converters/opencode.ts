@@ -47,8 +47,7 @@ import {
  * @see https://opencode.ai/docs/permissions/
  */
 const GRANULAR_PERMISSIONS = new Set([
-  "read", "edit", "glob", "grep", "list", "bash", "task",
-  "external_directory", "lsp", "skill",
+  "read", "edit", "glob", "grep", "bash", "task", "external_directory", "skill",
 ]);
 
 /**
@@ -74,12 +73,6 @@ const CANONICAL_TOOLS: Record<string, string> = {
 function canonicalTool(key: string): string {
   return CANONICAL_TOOLS[key.toLowerCase()] ?? key;
 }
-
-/**
- * Tools OpenCode has no permission key for. `buildPermissionConfig` drops these, so reporting
- * them `exact` claimed a conversion that never happened.
- */
-const UNREPRESENTABLE_TOOLS = new Set(["websearch"]);
 
 // --- Import ---
 
@@ -167,10 +160,20 @@ function parsePermissions(
 
 function parseFormatters(
   fmtConfig: Record<string, unknown>,
-): Formatter[] {
-  return Object.entries(fmtConfig).flatMap(([name, cfg]) => {
+): { formatters: Formatter[]; items: FidelityItem[] } {
+  const items: FidelityItem[] = [];
+  const note = (name: string, status: "lossy" | "dropped", reason: string) =>
+    items.push({ phase: "import", kind: "formatter", name, status, reason });
+  const formatters = Object.entries(fmtConfig).flatMap(([name, cfg]) => {
     if (typeof cfg === "object" && cfg !== null && !Array.isArray(cfg)) {
       const obj = cfg as Record<string, unknown>;
+      if (obj.disabled === true) {
+        note(name, "dropped", "formatter is disabled in OpenCode; importing it would enable it");
+        return [];
+      }
+      if (obj.environment !== undefined) {
+        note(name, "lossy", "formatter `environment` has no canonical field and was not imported");
+      }
       const command = getStringArray(obj, "command")?.join(" ").replace("$FILE", "").trim();
       const extensions = getStringArray(obj, "extensions") ?? [];
       const glob = extensions.length > 0
@@ -184,12 +187,14 @@ function parseFormatters(
     }
     return [];
   });
+  return { formatters, items };
 }
 
 function importMcpAndConfig(rootDir: string): {
   mcpServers: McpServer[];
   permissions: PermissionEntry[];
   formatters: Formatter[];
+  items: FidelityItem[];
 } {
   const configJson = readJsonAs(
     path.join(rootDir, "opencode.json"),
@@ -197,7 +202,7 @@ function importMcpAndConfig(rootDir: string): {
   );
 
   if (!configJson) {
-    return { mcpServers: [], permissions: [], formatters: [] };
+    return { mcpServers: [], permissions: [], formatters: [], items: [] };
   }
 
   const mcpServers: McpServer[] = configJson.mcp
@@ -208,11 +213,11 @@ function importMcpAndConfig(rootDir: string): {
     ? parsePermissions(configJson.permission)
     : [];
 
-  const formatters = (configJson.formatter && typeof configJson.formatter === "object")
+  const { formatters, items } = (configJson.formatter && typeof configJson.formatter === "object")
     ? parseFormatters(configJson.formatter)
-    : [];
+    : { formatters: [], items: [] };
 
-  return { mcpServers, permissions, formatters };
+  return { mcpServers, permissions, formatters, items };
 }
 
 function parseOpenCodeMcpEntry(
@@ -437,9 +442,10 @@ function buildMcpConfig(
   return Object.fromEntries(servers.map((s) => [s.name, buildMcpEntry(s)]));
 }
 
-function transformPermissionPattern(pattern: string): string {
-  return pattern.startsWith("domain:") ? `https://${pattern.slice(7)}/*` : pattern;
-}
+/** `webfetch` takes one action for all URLs, so a `domain:` pattern has nowhere to go. */
+const isDomainPattern = (p: PermissionEntry): boolean => p.pattern.startsWith("domain:");
+
+const STRICTNESS: Record<string, number> = { allow: 0, ask: 1, deny: 2 };
 
 /**
  * A shorthand-only tool takes one action for every pattern. Collapsing a set that contains a
@@ -470,14 +476,13 @@ function partitionPermissions(permissions: PermissionEntry[]): {
 
   for (const p of permissions) {
     const name = `${p.tool}(${p.pattern})`;
-    if (UNREPRESENTABLE_TOOLS.has(p.tool.toLowerCase())) {
-      // OpenCode does have project-level permissions; it simply has no key for this tool.
+    if (isDomainPattern(p)) {
       items.push(
-        permissionStatus(p, NO_ACTIONS, "OpenCode", `has no "${p.tool}" permission key`),
+        permissionStatus(p, NO_ACTIONS, "OpenCode", `has no URL or domain patterns for "${p.tool}"`),
       );
       continue;
     }
-    if (p.action !== "allow" && isShorthandOnly(p)) {
+    if (p.action !== "allow" && p.pattern !== "*" && isShorthandOnly(p)) {
       items.push({
         phase: "export",
         kind: "permission",
@@ -515,7 +520,7 @@ function buildPermissionConfig(
       const toolKey = p.tool.toLowerCase();
       if (!acc[toolKey]) acc[toolKey] = [];
       acc[toolKey].push({
-        pattern: transformPermissionPattern(p.pattern),
+        pattern: p.pattern,
         action: p.action,
       });
       return acc;
@@ -526,8 +531,8 @@ function buildPermissionConfig(
       if (GRANULAR_PERMISSIONS.has(tool)) {
         return [tool, Object.fromEntries(rules.map((r) => [r.pattern, r.action]))];
       }
-      // Shorthand-only: only allow entries reach here, so collapsing cannot widen.
-      return [tool, "allow"];
+      // Shorthand-only: a deny/ask reaches here only with pattern "*"; the strictest action wins.
+      return [tool, rules.reduce((a, r) => (STRICTNESS[r.action] > STRICTNESS[a] ? r.action : a), "allow")];
     }),
   );
 }
@@ -537,8 +542,8 @@ function buildPermissionConfig(
 export const opencodeConverter: Converter = {
   name: "opencode",
   label: "OpenCode",
-  // OpenCode's only tool-event mechanism is the formatter, which is a separate feature here. It
-  // has no general hook config, so a Hook has nowhere to go.
+  // OpenCode has no config-declared hooks. Plugins can subscribe to tool events, but
+  // harnessport does not generate them, so a Hook has nowhere to go.
   capabilities: {
     rule: "full",
     agent: "full",
@@ -560,7 +565,7 @@ export const opencodeConverter: Converter = {
   },
 
   import(rootDir: string): HarnessConfig {
-    const { mcpServers, permissions, formatters } = importMcpAndConfig(rootDir);
+    const { mcpServers, permissions, formatters, items } = importMcpAndConfig(rootDir);
 
     return {
       rules: importRules(rootDir),
@@ -574,7 +579,7 @@ export const opencodeConverter: Converter = {
       permissions,
       hooks: [],
       formatters,
-      items: takeReadProblems(),
+      items: [...takeReadProblems(), ...items],
     };
   },
 
@@ -616,7 +621,7 @@ export const opencodeConverter: Converter = {
         hookStatus(
           hook,
           "OpenCode",
-          "supports only formatters (PostToolUse on Edit/Write); enforcing a guardrail needs a plugin on tool.execute.before, which harnessport does not generate",
+          "has no config-declared hooks; a guardrail needs a plugin on tool.execute.before, which harnessport does not generate",
         ),
       );
     }

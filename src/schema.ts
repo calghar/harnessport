@@ -67,6 +67,10 @@ export interface Hook {
   event: string; // e.g. "PostToolUse"
   matcher?: string; // e.g. "Edit|Write|MultiEdit"
   command: string;
+  failClosed?: boolean; // a failing hook blocks the action
+  timeout?: number; // seconds
+  args?: string[];
+  dialect?: "claude" | "copilot"; // stdin/stdout contract; absent means claude
 }
 
 export interface Formatter {

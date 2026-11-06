@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Reported `PreToolUse` guardrails on OpenCode as `blocked` and exited `2`, instead of dropping them with a warning; harnessport does not generate the OpenCode plugin that enforces them
+
 ### Removed
 
 - The Windsurf target. `--to windsurf` and `--from windsurf` now exit `1` with an unknown-harness

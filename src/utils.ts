@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import type {
   FidelityItem,
   HarnessConfig,
+  Hook,
   McpServer,
   PermissionEntry,
   Skill,
@@ -540,6 +541,34 @@ export function permissionStatus(
   return { phase: "export", kind: "permission", name, status, reason };
 }
 
+export const GUARDRAIL_EVENTS: ReadonlySet<string> = new Set([
+  "PreToolUse",
+  "PermissionRequest",
+  "UserPromptSubmit",
+]);
+
+/**
+ * Status for a hook the target does not write. A guardrail the target cannot enforce is `blocked`,
+ * because dropping it silently removes a control; any other hook is `dropped`.
+ */
+export function hookStatus(
+  hook: Hook,
+  targetName: string,
+  limitation: string,
+  phase: FidelityItem["phase"] = "export",
+): FidelityItem {
+  const blocked = GUARDRAIL_EVENTS.has(hook.event);
+  return {
+    phase,
+    kind: "hook",
+    name: hook.event,
+    status: blocked ? "blocked" : "dropped",
+    reason: blocked
+      ? `${targetName} ${limitation}; this guardrail was not written`
+      : `${targetName} ${limitation}, so this hook was dropped`,
+  };
+}
+
 /**
  * Standard items for features a target cannot represent.
  * Shared by the cursor, copilot, and codex exporters.
@@ -554,7 +583,9 @@ export function generateDropItems(
     skills?: string;
     commands?: string;
     mcpServers?: string;
-    hooksFormatters?: string;
+    hooks?: string;
+    formatters?: string;
+    targetName?: string;
   },
 ): FidelityItem[] {
   const items: FidelityItem[] = [];
@@ -581,9 +612,13 @@ export function generateDropItems(
   if (unsupported.mcpServers && config.mcpServers.length > 0) {
     drop("mcp", config.mcpServers.map((s) => s.name), unsupported.mcpServers);
   }
-  if (unsupported.hooksFormatters) {
-    drop("hook", config.hooks.map((h) => h.event), unsupported.hooksFormatters);
-    drop("formatter", config.formatters.map((f) => f.glob), unsupported.hooksFormatters);
+  if (unsupported.hooks) {
+    items.push(
+      ...config.hooks.map((h) => hookStatus(h, unsupported.targetName ?? "The target", unsupported.hooks!)),
+    );
+  }
+  if (unsupported.formatters) {
+    drop("formatter", config.formatters.map((f) => f.glob), unsupported.formatters);
   }
   return items;
 }

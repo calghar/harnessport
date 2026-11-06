@@ -26,6 +26,7 @@ import {
   getStringRecord,
   importSkillsFromDir,
   exportSkillsToDir,
+  hookStatus,
   exportRulesToFile,
   writeIfNotDry,
   uniqueSlugs,
@@ -609,17 +610,13 @@ export const opencodeConverter: Converter = {
     );
 
     for (const hook of config.hooks) {
-      items.push({
-        phase: "export",
-        kind: "hook",
-        name: hook.event,
-        // Nothing is written for a hook, so this is `dropped`, not `lossy`. `lossy` means the
-        // content reached the target with a field removed; the distinction is what lets a reader
-        // tell "in the file, minus a detail" from "not in the file at all".
-        status: "dropped",
-        reason:
-          "OpenCode supports only formatters (PostToolUse on Edit/Write); this hook was dropped",
-      });
+      items.push(
+        hookStatus(
+          hook,
+          "OpenCode",
+          "supports only formatters (PostToolUse on Edit/Write); enforcing a guardrail needs a plugin on tool.execute.before, which harnessport does not generate",
+        ),
+      );
     }
 
     for (const cmd of config.commands) {

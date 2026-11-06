@@ -231,17 +231,43 @@ describe("Requirement: The README matrix is generated and drift fails the check"
   });
 });
 
-describe("Requirement: A hook OpenCode cannot run is reported dropped", () => {
-  it("A claude PreToolUse hook exported to opencode is dropped", () => {
-    const [item] = itemsOfKind(exportEveryFeature(opencodeConverter), "hook");
+describe("Requirement: A guardrail a target cannot write or enforce is blocked", () => {
+  const exportHook = (event: string) =>
+    opencodeConverter.export(
+      tmpDir(),
+      { ...everyFeature(), hooks: [{ event, matcher: "Bash", command: "./h.sh" }] },
+      {},
+    ).items;
+  const exitCode = (items: FidelityItem[]) => (items.some((i) => i.status === "blocked") ? 2 : 0);
+
+  it("A claude PreToolUse hook exported to opencode is blocked", () => {
+    const items = exportHook("PreToolUse");
+    const [item] = itemsOfKind(items, "hook");
     expect(item.name).toBe("PreToolUse");
-    expect(item.status).toBe("dropped");
-    expect(item.reason).toMatch(/formatters/i);
+    expect(item.status).toBe("blocked");
+    expect(item.reason).toContain("tool.execute.before");
+    expect(exitCode(items)).toBe(2);
   });
 
-  it("A dropped hook does not fail the run", () => {
-    const items = exportEveryFeature(opencodeConverter);
-    expect(items.filter((i) => i.status === "blocked")).toHaveLength(0);
+  it("A claude PostToolUse hook exported to opencode is dropped", () => {
+    const items = exportHook("PostToolUse");
+    const [item] = itemsOfKind(items, "hook");
+    expect(item.status).toBe("dropped");
+    expect(exitCode(items)).toBe(0);
+  });
+
+  it("Cursor reports a guardrail blocked and keeps formatters dropped", () => {
+    const items = exportEveryFeature(cursorConverter);
+    expect(itemsOfKind(items, "hook")[0].status).toBe("blocked");
+    expect(itemsOfKind(items, "formatter")[0].status).toBe("dropped");
+  });
+
+  it("Codex drop items for non-hook features are unchanged", () => {
+    const items = exportEveryFeature(codexConverter);
+    expect(itemsOfKind(items, "agent")[0].status).toBe("dropped");
+    expect(itemsOfKind(items, "command")[0].status).toBe("dropped");
+    expect(itemsOfKind(items, "mcp")[0].status).toBe("dropped");
+    expect(itemsOfKind(items, "hook")[0].status).toBe("exact");
   });
 
   it("Formatters are still converted", () => {

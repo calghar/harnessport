@@ -220,7 +220,9 @@ export const cursorConverter: Converter = {
 
     items.push(
       ...generateDropItems(config, {
-        hooksFormatters: "Cursor has no hooks or formatter config",
+        targetName: "Cursor",
+        hooks: "Cursor hooks not yet converted",
+        formatters: "Cursor has no hooks or formatter config",
       }),
       ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
       ...exactItems("agent", config.agents.map((a) => a.name)),

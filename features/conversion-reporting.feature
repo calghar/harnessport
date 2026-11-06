@@ -166,3 +166,11 @@ Feature: conversion-reporting
     When importing from claude
     Then no item names `.mcp.json`
     And the config holds no MCP servers
+
+  @requirement_malformed_input_is_distinguishable_from_absent_input
+  Scenario: A malformed frontmatter file is reported, not fatal
+    Given a source directory holding `.claude/agents/bad.md` with invalid YAML frontmatter and `.claude/agents/good.md` with valid frontmatter
+    When importing from claude
+    Then the import does not throw
+    And the config holds the agent from `good.md`
+    And a `blocked` item with phase `import` and kind `agent` is reported, naming `bad.md` and the YAML error

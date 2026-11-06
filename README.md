@@ -18,7 +18,7 @@ against what that converter actually reports converting. Run `npm run docs:matri
 | MCP Servers | yes         | yes      | yes    | yes     | user-level |
 | Permissions | yes         | yes      | -      | -       | -          |
 | Hooks       | yes         | -        | yes    | yes     | yes        |
-| Formatters  | yes         | yes      | -      | -       | -          |
+| Formatters  | yes         | yes      | yes    | -       | -          |
 
 - **yes** — imported and exported
 - **user-level** — the harness stores this outside your repository, in a file harnessport does not read or write

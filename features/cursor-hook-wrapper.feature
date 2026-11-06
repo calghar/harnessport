@@ -15,6 +15,13 @@ Feature: cursor-hook-wrapper
     And no file `.claude/settings.json` is written
 
   @requirement_claude_guardrails_export_to_cursor_through_a_generated_node_wrapper
+  Scenario: A user-level target writes absolute wrapper paths
+    Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh"}` and a home directory passed to the exporter
+    When converting from claude to cursor with the target equal to that home directory
+    Then `hooks.preToolUse[0].command` in `.cursor/hooks.json` equals `node "<absolute path>/.cursor/hooks/harnessport-guard-1.mjs"`, with the path in double quotes
+    And converting into any other directory still writes `node .cursor/hooks/harnessport-guard-1.mjs`
+
+  @requirement_claude_guardrails_export_to_cursor_through_a_generated_node_wrapper
   Scenario: A guardrail without failClosed gets no failClosed key
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
@@ -33,12 +40,6 @@ Feature: cursor-hook-wrapper
     When converting from claude to cursor into that directory without `--force`
     Then the file is byte-identical to its content before the run
     And an item names `.cursor/hooks.json` with status `blocked`
-
-  @requirement_claude_guardrails_export_to_cursor_through_a_generated_node_wrapper
-  Scenario: Cursor formatters stay dropped
-    Given a canonical config holding one formatter
-    When converting from claude to cursor
-    Then the item of kind `formatter` has status `dropped`
 
   # Requirement: Cursor matchers and events are mapped or reported
   # The Cursor exporter SHALL map each `|` token of a guardrail matcher as follows: `Bash` to `Shell`, `Read` to `Read`, `Write` to `Write`, `Grep` to `Grep`, `Edit` and `MultiEdit` to `Write`. Duplicate results are written once. A matcher of `*`, empty or absent maps to `*`. An `Edit` or `MultiEdit` token SHALL make the item `lossy`, with a reason stating that Cursor `Write` covers both creates and edits. A `*` matcher SHALL make the item `lossy`, with a reason stating that Cursor tool names other than `Shell` reach the script unrenamed. Any other token, and any matcher other than a lone `*` that contains a character outside letters, digits, `_` and `|`, SHALL make the item `blocked`, with a reason naming the token. If any matcher token is unmapped, the item is `blocked` and no `lossy` reason is added. An empty or absent matcher is `lossy` under the `*` reason. A `PermissionRequest` or `UserPromptSubmit` guardrail SHALL be reported `blocked`. A non-guardrail hook SHALL be reported `dropped`, with the reason: "Cursor runs this hook only if `.claude/settings.json` holds it and Third-Party Imports is on."

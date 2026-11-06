@@ -14,6 +14,13 @@ import type {
 } from "../schema.js";
 import type { WriteContext } from "../utils.js";
 import {
+  FORMAT_RUNNER_MARKER,
+  formatRunnerSource,
+  formatterItem,
+  parseRunnerCommand,
+  writableFormatters,
+} from "./formatter-runner.js";
+import {
   readMarkdownFile,
   serializeFrontmatter,
   readFileIfExists,
@@ -174,10 +181,8 @@ function importPermissions(rootDir: string): PermissionEntry[] {
   });
 }
 
-const FORMAT_RUNNER_MARKER = "harnessport-format.mjs";
 const FORMAT_RUNNER_REL = `.claude/hooks/${FORMAT_RUNNER_MARKER}`;
 const FORMAT_RUNNER_COMMAND = `node "$CLAUDE_PROJECT_DIR/${FORMAT_RUNNER_REL}"`;
-const SHELL_SYNTAX = /["'|&;$<>`]/;
 
 function isFormatterHook(
   event: string,
@@ -194,8 +199,8 @@ function isFormatterHook(
 
 /** Glob and command of a formatter handler, from the runner form or the legacy `$FILEPATH` form. */
 function parseFormatterCommand(command: string): Formatter {
-  const runner = new RegExp(`${FORMAT_RUNNER_MARKER}"?\\s+"([^"]*)"\\s+(.*)$`).exec(command);
-  if (runner) return { glob: runner[1], command: runner[2].trim() };
+  const runner = parseRunnerCommand(command);
+  if (runner) return runner;
   const cmd = command.replace(/\s*\$FILEPATH\s*$/, "").trim();
   return { glob: inferGlobFromCommand(cmd), command: cmd };
 }
@@ -381,30 +386,6 @@ const acceptsClaudeDialect = (h: Hook): boolean => !h.dialect || h.dialect === "
 
 type HookEntry = { hooks: HookHandler[]; matcher?: string };
 
-const shellSyntaxIn = (fmt: Formatter): string | undefined =>
-  SHELL_SYNTAX.exec(`${fmt.glob} ${fmt.command}`)?.[0];
-
-const writableFormatters = (config: HarnessConfig): Formatter[] =>
-  config.formatters.filter((f) => shellSyntaxIn(f) === undefined);
-
-// Reads the edited path from stdin, so the formatter needs no shell and no $FILEPATH quoting.
-const FORMAT_RUNNER_SOURCE = [
-  'import { spawnSync } from "node:child_process";',
-  'import { readFileSync } from "node:fs";',
-  'import { basename } from "node:path";',
-  "const [glob, ...cmd] = process.argv.slice(2);",
-  "const toRegExp = (g) => new RegExp(\"^\" + g.replace(/[.+^$()|[\\]\\\\]/g, \"\\\\$&\")",
-  "  .replace(/\\{([^}]*)\\}/g, (_, a) => \"(\" + a.split(\",\").join(\"|\") + \")\")",
-  "  .replace(/\\*\\*/g, \"\\0\").replace(/\\*/g, \"[^/]*\").replace(/\\?/g, \"[^/]\").replace(/\\0/g, \".*\") + \"$\");",
-  "let file;",
-  "try { file = JSON.parse(readFileSync(0, \"utf-8\")).tool_input?.file_path; } catch (e) {}",
-  "if (typeof file !== \"string\" || file === \"\" || cmd.length === 0) process.exit(0);",
-  "if (!toRegExp(glob).test(glob.includes(\"/\") ? file : basename(file))) process.exit(0);",
-  "const r = spawnSync(cmd[0], [...cmd.slice(1), file], { stdio: \"inherit\" });",
-  "process.exit(r.status ?? 1);",
-  "",
-].join("\n");
-
 function buildHooksJson(
   config: HarnessConfig,
 ): Record<string, HookEntry[]> {
@@ -465,7 +446,7 @@ function exportSettings(
   const formatters = writableFormatters(config);
   if (formatters.length > 0) {
     const runner = path.join(rootDir, FORMAT_RUNNER_REL);
-    if (writeIfNotDry(runner, FORMAT_RUNNER_SOURCE, ctx)) files.push(runner);
+    if (writeIfNotDry(runner, formatRunnerSource("tool_input?.file_path"), ctx)) files.push(runner);
   }
 
   if (config.hooks.length > 0 || formatters.length > 0) {
@@ -487,21 +468,6 @@ function exportSettings(
   return files;
 }
 
-
-/** The runner carries the glob as an argument, so a formatter is exact unless it needs a shell. */
-function formatterItem(fmt: Formatter): FidelityItem {
-  const char = shellSyntaxIn(fmt);
-  if (char === undefined) {
-    return { phase: "export", kind: "formatter", name: fmt.glob, status: "exact" };
-  }
-  return {
-    phase: "export",
-    kind: "formatter",
-    name: fmt.glob,
-    status: "dropped",
-    reason: `the formatter runner spawns without a shell, so the \`${char}\` character cannot be passed; this formatter was not written`,
-  };
-}
 
 export const claudeConverter: Converter = {
   name: "claude",

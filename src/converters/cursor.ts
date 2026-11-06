@@ -3,6 +3,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import type { Converter, ExportOptions, ExportResult } from "./types.js";
 import { NO_PERMISSIONS } from "./types.js";
+import {
+  FORMAT_RUNNER_MARKER,
+  formatRunnerSource,
+  formatterItem,
+  parseRunnerCommand,
+  writableFormatters,
+} from "./formatter-runner.js";
 import type {
   HarnessConfig,
   Rule,
@@ -10,12 +17,15 @@ import type {
   Command,
   FidelityItem,
   Hook,
+  Formatter,
+  PermissionEntry,
 } from "../schema.js";
 import type { WriteContext } from "../utils.js";
 import {
   readMarkdownFile,
   serializeFrontmatter,
   readFileIfExists,
+  readJsonAs,
   listMdFiles,
   getString,
   getStringOrFallback,
@@ -100,6 +110,35 @@ function importAgents(rootDir: string): Agent[] {
       body: content,
     }];
   });
+}
+
+function isAfterFileEditJson(v: unknown): v is { hooks?: { afterFileEdit?: Array<{ command?: unknown }> } } {
+  return typeof v === "object" && v !== null;
+}
+
+/** Runner entries become formatters. Every other `afterFileEdit` entry is reported dropped. */
+function importFormatters(rootDir: string): { formatters: Formatter[]; items: FidelityItem[] } {
+  const json = readJsonAs(path.join(rootDir, ".cursor", "hooks.json"), isAfterFileEditJson);
+  const entries = Array.isArray(json?.hooks?.afterFileEdit) ? json.hooks.afterFileEdit : [];
+  const formatters: Formatter[] = [];
+  const items: FidelityItem[] = [];
+  for (const entry of entries) {
+    const command = typeof entry?.command === "string" ? entry.command : "";
+    const parsed = command.includes(FORMAT_RUNNER_MARKER) ? parseRunnerCommand(command) : undefined;
+    if (parsed) {
+      formatters.push(parsed);
+    } else {
+      items.push(
+        hookStatus(
+          { event: "afterFileEdit", command },
+          "Cursor",
+          "imports only harnessport formatter entries from afterFileEdit",
+          "import",
+        ),
+      );
+    }
+  }
+  return { formatters, items };
 }
 
 // --- Export ---
@@ -222,6 +261,11 @@ const REASON_TWICE =
   "the command runs twice when `.claude/settings.json` also holds it and Third-Party Imports is on";
 const REASON_EDIT = "Cursor `Write` covers both creates and edits";
 const REASON_STAR = "Cursor tool names other than `Shell` reach the script unrenamed";
+const REASON_HOOKS_REFUSED =
+  "`.cursor/hooks.json` or the formatter runner already exists with different content; this formatter was not written";
+const REASON_GUARD_REFUSED = "`.cursor/hooks.json` already exists with different content; this guardrail was not written";
+const REASON_FORMAT_TWICE =
+  "the formatter runs twice when `.claude/settings.json` also holds it and Third-Party Imports is on";
 const REASON_NOT_WRITTEN = "runs this hook only if `.claude/settings.json` holds it and Third-Party Imports is on";
 
 /** Cursor matcher plus the lossy reasons, or the first token that cannot be mapped. */
@@ -240,9 +284,11 @@ function mapMatcher(
   };
 }
 
+const FORMAT_RUNNER_REL = `.cursor/hooks/${FORMAT_RUNNER_MARKER}`;
+
 function exportHooks(
   rootDir: string,
-  hooks: Hook[],
+  config: HarnessConfig,
   ctx: WriteContext,
   userLevel: boolean,
 ): { files: string[]; items: FidelityItem[] } {
@@ -251,7 +297,7 @@ function exportHooks(
   const entries: Array<Record<string, unknown>> = [];
   const hooksDir = path.join(rootDir, ".cursor", "hooks");
 
-  for (const hook of hooks) {
+  for (const hook of config.hooks) {
     if (hook.event !== "PreToolUse") {
       items.push(
         hookStatus(
@@ -293,7 +339,9 @@ function exportHooks(
       reason: reasons.join("; "),
     });
   }
-  if (entries.length === 0) return { files, items };
+  const formatters = writableFormatters(config);
+  items.push(...config.formatters.filter((f) => !formatters.includes(f)).map(formatterItem));
+  if (entries.length === 0 && formatters.length === 0) return { files, items };
 
   const stale = (fs.existsSync(hooksDir) ? fs.readdirSync(hooksDir) : []).filter((f) => {
     const m = /^harnessport-guard-(\d+)\.mjs$/.exec(f);
@@ -304,10 +352,108 @@ function exportHooks(
     if (last) last.reason += `; stale wrapper files remain and are not referenced: ${stale.join(", ")}`;
   }
 
+  const formatEntries: Array<Record<string, unknown>> = [];
+  let runnerWritten = true;
+  if (formatters.length > 0) {
+    const runner = path.join(rootDir, FORMAT_RUNNER_REL);
+    runnerWritten = writeIfNotDry(runner, formatRunnerSource("file_path"), ctx);
+    if (runnerWritten) files.push(runner);
+    const runnerArg = userLevel ? `"${runner}"` : FORMAT_RUNNER_REL;
+    for (const fmt of formatters) {
+      formatEntries.push({ command: `node ${runnerArg} "${fmt.glob}" ${fmt.command}` });
+    }
+  }
+
   const filePath = path.join(rootDir, ".cursor", "hooks.json");
-  const json = { version: 1, hooks: { preToolUse: entries } };
-  if (writeIfNotDry(filePath, `${JSON.stringify(json, null, 2)}\n`, ctx)) files.push(filePath);
+  const json = {
+    version: 1,
+    hooks: {
+      ...(entries.length > 0 && { preToolUse: entries }),
+      ...(formatEntries.length > 0 && { afterFileEdit: formatEntries }),
+    },
+  };
+  const hooksWritten = writeIfNotDry(filePath, `${JSON.stringify(json, null, 2)}\n`, ctx);
+  if (hooksWritten) files.push(filePath);
+  else {
+    for (const item of items) {
+      if (item.kind === "hook" && (item.status === "exact" || item.status === "lossy")) {
+        item.status = "blocked";
+        item.reason = REASON_GUARD_REFUSED;
+      }
+    }
+  }
+  const formatted = hooksWritten && runnerWritten;
+  items.push(
+    ...formatters.map((fmt): FidelityItem =>
+      formatted
+        ? { ...formatterItem(fmt), status: "lossy", reason: REASON_FORMAT_TWICE }
+        : { ...formatterItem(fmt), status: "blocked", reason: REASON_HOOKS_REFUSED },
+    ),
+  );
   return { files, items };
+}
+
+// --- Permissions ---
+
+const CLI_JSON_REL = ".cursor/cli.json";
+const REASON_USER_LEVEL = "keeps user-level permissions in `~/.cursor/cli-config.json`, which harnessport never writes";
+const REASON_DENY_UNVERIFIED = (tool: string): string =>
+  `Cursor's \`${tool}\` matching is not verified to be no narrower than this deny, so the rule was not written`;
+const REASON_BASE_DENY = "the deny covers every command with the same first token, not only this pattern";
+const REASON_CLI_REFUSED = "`.cursor/cli.json` already exists with different content; this rule was not written";
+
+type CursorRule = { list: "allow" | "deny"; rule: string; item: FidelityItem };
+
+/** The Cursor rule for one entry, or the item that says why none is written (D2). */
+function mapPermission(p: PermissionEntry): CursorRule | FidelityItem {
+  const name = `${p.tool}(${p.pattern})`;
+  const base = p.pattern.split(/\s+/)[0];
+  if (p.tool === "Bash" && p.action === "allow" && p.pattern === "*") {
+    return { list: "allow", rule: "Shell(*)", item: { phase: "export", kind: "permission", name, status: "exact" } };
+  }
+  if (p.tool === "Bash" && p.action === "deny" && base !== "") {
+    const exact = p.pattern === "*";
+    return {
+      list: "deny",
+      rule: exact ? "Shell(*)" : `Shell(${base})`,
+      item: { phase: "export", kind: "permission", name, status: exact ? "exact" : "lossy", ...(exact ? {} : { reason: REASON_BASE_DENY }) },
+    };
+  }
+  if (p.action === "deny") {
+    return { phase: "export", kind: "permission", name, status: "blocked", reason: REASON_DENY_UNVERIFIED(p.tool) };
+  }
+  return permissionStatus(p, NO_PERMISSIONS, "Cursor", "writes only `Shell(*)` allow rules and deny rules");
+}
+
+function exportPermissions(
+  rootDir: string,
+  permissions: PermissionEntry[],
+  ctx: WriteContext,
+  userLevel: boolean,
+): { files: string[]; items: FidelityItem[] } {
+  if (userLevel) {
+    return {
+      files: [],
+      items: permissions.map((p) => permissionStatus(p, NO_PERMISSIONS, "Cursor", REASON_USER_LEVEL)),
+    };
+  }
+  const mapped = permissions.map(mapPermission);
+  const rules = mapped.filter((m): m is CursorRule => "list" in m);
+  const items = mapped.map((m) => ("list" in m ? m.item : m));
+  if (rules.length === 0) return { files: [], items };
+
+  const pick = (list: CursorRule["list"]): string[] => [...new Set(rules.filter((r) => r.list === list).map((r) => r.rule))];
+  const filePath = path.join(rootDir, CLI_JSON_REL);
+  const json = { permissions: { allow: pick("allow"), deny: pick("deny") } };
+  if (writeIfNotDry(filePath, `${JSON.stringify(json, null, 2)}\n`, ctx)) return { files: [filePath], items };
+  return {
+    files: [],
+    items: mapped.map((m) =>
+      "list" in m
+        ? { ...m.item, status: m.list === "deny" ? "blocked" : "dropped", reason: REASON_CLI_REFUSED }
+        : m,
+    ),
+  };
 }
 
 // --- Converter ---
@@ -323,7 +469,7 @@ export const cursorConverter: Converter = {
     mcp: "full",
     permission: "none",
     hook: "full",
-    formatter: "none",
+    formatter: "full",
   },
   permissionActions: NO_PERMISSIONS,
 
@@ -341,6 +487,7 @@ export const cursorConverter: Converter = {
 
   import(rootDir: string): HarnessConfig {
     const cursorDir = path.join(rootDir, ".cursor");
+    const formatterImport = importFormatters(rootDir);
     return {
       rules: importRules(rootDir),
       agents: importAgents(rootDir),
@@ -349,8 +496,8 @@ export const cursorConverter: Converter = {
       mcpServers: importMcpFromJson(path.join(cursorDir, "mcp.json")),
       permissions: [],
       hooks: [],
-      formatters: [],
-      items: takeReadProblems(),
+      formatters: formatterImport.formatters,
+      items: [...takeReadProblems(), ...formatterImport.items],
     };
   },
 
@@ -363,14 +510,12 @@ export const cursorConverter: Converter = {
     const cursorDir = path.join(rootDir, ".cursor");
     const items: FidelityItem[] = [...config.items];
     const homeDir = options.homeDir ?? os.homedir();
-    const hookExport = exportHooks(
-      rootDir,
-      config.hooks,
-      ctx,
-      path.resolve(rootDir) === path.resolve(homeDir),
-    );
+    const userLevel = path.resolve(rootDir) === path.resolve(homeDir);
+    const hookExport = exportHooks(rootDir, config, ctx, userLevel);
+    const permissionExport = exportPermissions(rootDir, config.permissions, ctx, userLevel);
     const filesWritten: string[] = [
       ...hookExport.files,
+      ...permissionExport.files,
       ...exportRules(rootDir, config, ctx),
       ...exportCommands(rootDir, config.commands, ctx),
       ...exportAgents(rootDir, config.agents, ctx),
@@ -379,18 +524,13 @@ export const cursorConverter: Converter = {
     ];
 
     items.push(
-      ...generateDropItems(config, {
-        targetName: "Cursor",
-        formatters: "Cursor exports hooks but has no formatter config",
-      }),
+      ...generateDropItems(config, { targetName: "Cursor" }),
       ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
       ...exactItems("agent", config.agents.map((a) => a.name)),
       ...exactItems("skill", config.skills.map((s) => s.name)),
       ...exactItems("command", config.commands.map((c) => c.name)),
       ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
-      ...config.permissions.map((p) =>
-        permissionStatus(p, cursorConverter.permissionActions, "Cursor"),
-      ),
+      ...permissionExport.items,
     );
 
     items.push(...hookExport.items, ...ctx.items);

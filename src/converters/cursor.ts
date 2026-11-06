@@ -260,6 +260,11 @@ const REASON_NODE = "the wrapper needs `node` on PATH";
 const REASON_TWICE =
   "the command runs twice when `.claude/settings.json` also holds it and Third-Party Imports is on";
 const REASON_EDIT = "Cursor `Write` covers both creates and edits";
+const REASON_READ_RANGE =
+  "Cursor does not pass offset or limit to hooks, so a hook that allows ranged reads sees every read as a full read";
+const REASON_NATIVE =
+  "Cursor runs this hook from .claude/settings.json when its Third-Party Imports setting is on, so harnessport writes nothing. If that setting is off, the hook does not run";
+const NATIVE_TOOLS = new Set(["Read", "Write"]);
 const REASON_STAR = "Cursor tool names other than `Shell` reach the script unrenamed";
 const REASON_HOOKS_REFUSED =
   "`.cursor/hooks.json` or the formatter runner already exists with different content; this formatter was not written";
@@ -280,7 +285,10 @@ function mapMatcher(
   if (bad !== undefined) return { blocked: bad };
   return {
     matcher: [...new Set(tokens.map((t) => CURSOR_TOOLS[t]))].join("|"),
-    reasons: tokens.some((t) => EDIT_TOKENS.has(t)) ? [REASON_EDIT] : [],
+    reasons: [
+      ...(tokens.some((t) => EDIT_TOKENS.has(t)) ? [REASON_EDIT] : []),
+      ...(tokens.includes("Read") ? [REASON_READ_RANGE] : []),
+    ],
   };
 }
 
@@ -296,6 +304,7 @@ function exportHooks(
   const files: string[] = [];
   const entries: Array<Record<string, unknown>> = [];
   const hooksDir = path.join(rootDir, ".cursor", "hooks");
+  const nativeItems = new Set<FidelityItem>();
 
   for (const hook of config.hooks) {
     if (hook.event !== "PreToolUse") {
@@ -317,6 +326,18 @@ function exportHooks(
     const mapped = mapMatcher(hook.matcher);
     if ("blocked" in mapped) {
       items.push(hookStatus(hook, "Cursor", `cannot map the matcher token \`${mapped.blocked}\``));
+      continue;
+    }
+    if (mapped.matcher.split("|").every((t) => NATIVE_TOOLS.has(t))) {
+      const item: FidelityItem = {
+        phase: "export",
+        kind: "hook",
+        name: hook.event,
+        status: "lossy",
+        reason: [REASON_NATIVE, ...mapped.reasons].join("; "),
+      };
+      nativeItems.add(item);
+      items.push(item);
       continue;
     }
     const n = entries.length + 1;
@@ -348,7 +369,7 @@ function exportHooks(
     return m !== null && Number(m[1]) > entries.length;
   });
   if (stale.length > 0) {
-    const last = items.filter((i) => i.status === "exact" || i.status === "lossy").at(-1);
+    const last = items.filter((i) => !nativeItems.has(i) && (i.status === "exact" || i.status === "lossy")).at(-1);
     if (last) last.reason += `; stale wrapper files remain and are not referenced: ${stale.join(", ")}`;
   }
 
@@ -376,7 +397,7 @@ function exportHooks(
   if (hooksWritten) files.push(filePath);
   else {
     for (const item of items) {
-      if (item.kind === "hook" && (item.status === "exact" || item.status === "lossy")) {
+      if (item.kind === "hook" && !nativeItems.has(item) && (item.status === "exact" || item.status === "lossy")) {
         item.status = "blocked";
         item.reason = REASON_GUARD_REFUSED;
       }

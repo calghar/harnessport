@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Exported shell-free formatters to Cursor as an `afterFileEdit` hook, imported them back, and exported Claude `Bash` deny rules to `.cursor/cli.json`
 
+### Changed
+
+- Stopped writing a Cursor wrapper for a `Read` or `Write` `PreToolUse` hook that Cursor runs from
+  `.claude/settings.json`, and reported any `Read` hook as `lossy` because Cursor drops `offset`
+  and `limit`
+
 ## [0.3.0] - 2026-11-06
 
 ### Security

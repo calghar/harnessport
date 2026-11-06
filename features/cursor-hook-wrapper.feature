@@ -3,7 +3,7 @@
 Feature: cursor-hook-wrapper
 
   # Requirement: Claude guardrails export to Cursor through a generated Node wrapper
-  # For each `PreToolUse` hook of dialect `claude`, the Cursor exporter SHALL write one wrapper file `.cursor/hooks/harnessport-guard-<n>.mjs`, where `<n>` counts written wrappers from `1` in config order. It SHALL write `.cursor/hooks.json` as `{version: 1, hooks: {preToolUse: [<entry>]}}`. Each entry is `{command: "node .cursor/hooks/harnessport-guard-<n>.mjs", matcher, timeout?, failClosed?}`. `timeout` equals the hook `timeout` in seconds. `failClosed: true` is written only when the hook has `failClosed: true`. The item of kind `hook` names `PreToolUse`, and its reason states that the wrapper needs `node` on `PATH`. The Cursor exporter SHALL NOT write `.claude/settings.json`. An existing `.cursor/hooks.json` or `.claude/hooks/harnessport-format.mjs` with different content SHALL be reported `blocked` unless `--force` is given. A `harnessport-guard-<n>.mjs` file with `<n>` above the written count SHALL be named in the item reason.
+  # For each `PreToolUse` hook of dialect `claude` that Cursor does not run natively (see `cursor-native-hooks`), the Cursor exporter SHALL write one wrapper file `.cursor/hooks/harnessport-guard-<n>.mjs`, where `<n>` counts written wrappers from `1` in config order. It SHALL write `.cursor/hooks.json` as `{version: 1, hooks: {preToolUse: [<entry>]}}`. Each entry is `{command: "node .cursor/hooks/harnessport-guard-<n>.mjs", matcher, timeout?, failClosed?}`. `timeout` equals the hook `timeout` in seconds. `failClosed: true` is written only when the hook has `failClosed: true`. The item of kind `hook` names `PreToolUse`, and its reason states that the wrapper needs `node` on `PATH`. The Cursor exporter SHALL NOT write `.claude/settings.json`. An existing `.cursor/hooks.json` or `.claude/hooks/harnessport-format.mjs` with different content SHALL be reported `blocked` unless `--force` is given. A `harnessport-guard-<n>.mjs` file with `<n>` above the written count SHALL be named in the item reason.
 
   @requirement_claude_guardrails_export_to_cursor_through_a_generated_node_wrapper
   Scenario: A claude Bash guardrail becomes a Cursor preToolUse Shell entry
@@ -45,10 +45,10 @@ Feature: cursor-hook-wrapper
   # The Cursor exporter SHALL map each `|` token of a guardrail matcher as follows: `Bash` to `Shell`, `Read` to `Read`, `Write` to `Write`, `Grep` to `Grep`, `Edit` and `MultiEdit` to `Write`. Duplicate results are written once. A matcher of `*`, empty or absent maps to `*`. An `Edit` or `MultiEdit` token SHALL make the item `lossy`, with a reason stating that Cursor `Write` covers both creates and edits. A `*` matcher SHALL make the item `lossy`, with a reason stating that Cursor tool names other than `Shell` reach the script unrenamed. Any other token, and any matcher other than a lone `*` that contains a character outside letters, digits, `_` and `|`, SHALL make the item `blocked`, with a reason naming the token. If any matcher token is unmapped, the item is `blocked` and no `lossy` reason is added. An empty or absent matcher is `lossy` under the `*` reason. A `PermissionRequest` or `UserPromptSubmit` guardrail SHALL be reported `blocked`. A non-guardrail hook SHALL be reported `dropped`, with the reason: "Cursor runs this hook only if `.claude/settings.json` holds it and Third-Party Imports is on."
 
   @requirement_cursor_matchers_and_events_are_mapped_or_reported
-  Scenario: An Edit|Write matcher becomes Write and is lossy
-    Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Edit|Write", command: "./guard.sh"}`
+  Scenario: A Bash|Edit matcher becomes Shell|Write and is lossy
+    Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash|Edit", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
-    Then `hooks.preToolUse[0].matcher` equals `Write`
+    Then `hooks.preToolUse[0].matcher` equals `Shell|Write`
     And the item of kind `hook` named `PreToolUse` has status `lossy` and its reason names creates and edits
 
   @requirement_cursor_matchers_and_events_are_mapped_or_reported

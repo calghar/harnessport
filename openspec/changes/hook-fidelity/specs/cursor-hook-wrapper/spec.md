@@ -2,7 +2,7 @@
 
 ### Requirement: Claude guardrails export to Cursor through a generated Node wrapper
 
-For each `PreToolUse` hook of dialect `claude`, the Cursor exporter SHALL write one wrapper file
+For each `PreToolUse` hook of dialect `claude` that Cursor does not run natively (see `cursor-native-hooks`), the Cursor exporter SHALL write one wrapper file
 `.cursor/hooks/harnessport-guard-<n>.mjs`, where `<n>` counts written wrappers from `1` in config
 order. It SHALL write `.cursor/hooks.json` as `{version: 1, hooks: {preToolUse: [<entry>]}}`. Each
 entry is `{command: "node .cursor/hooks/harnessport-guard-<n>.mjs", matcher, timeout?, failClosed?}`.
@@ -59,10 +59,10 @@ A `PermissionRequest` or `UserPromptSubmit` guardrail SHALL be reported `blocked
 hook SHALL be reported `dropped`, with the reason: "Cursor runs this hook only if
 `.claude/settings.json` holds it and Third-Party Imports is on."
 
-#### Scenario: An Edit|Write matcher becomes Write and is lossy
-- **GIVEN** a canonical config holding a hook `{event: "PreToolUse", matcher: "Edit|Write", command: "./guard.sh"}`
+#### Scenario: A Bash|Edit matcher becomes Shell|Write and is lossy
+- **GIVEN** a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash|Edit", command: "./guard.sh"}`
 - **WHEN** converting from claude to cursor into a new directory
-- **THEN** `hooks.preToolUse[0].matcher` equals `Write`
+- **THEN** `hooks.preToolUse[0].matcher` equals `Shell|Write`
 - **AND** the item of kind `hook` named `PreToolUse` has status `lossy` and its reason names creates and edits
 
 #### Scenario: A regex matcher is blocked

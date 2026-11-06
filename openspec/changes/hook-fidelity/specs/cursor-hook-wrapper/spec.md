@@ -44,11 +44,6 @@ written count SHALL be named in the item reason.
 - **THEN** the file is byte-identical to its content before the run
 - **AND** an item names `.cursor/hooks.json` with status `blocked`
 
-#### Scenario: Cursor formatters stay dropped
-- **GIVEN** a canonical config holding one formatter
-- **WHEN** converting from claude to cursor
-- **THEN** the item of kind `formatter` has status `dropped`
-
 ### Requirement: Cursor matchers and events are mapped or reported
 
 The Cursor exporter SHALL map each `|` token of a guardrail matcher as follows: `Bash` to `Shell`,

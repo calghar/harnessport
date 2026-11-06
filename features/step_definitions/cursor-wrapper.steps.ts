@@ -301,3 +301,35 @@ Then(
     assert.equal(this.run.status, Number(code ?? 0));
   },
 );
+
+// --- User-level target: the wrapper path is absolute ---
+
+Given(
+  /^a canonical config holding a hook `\{event: "(\w+)", matcher: "(\w+)", command: "([^"]+)"\}` and a home directory passed to the exporter$/,
+  function (this: CursorWorld, event: string, matcher: string, command: string) {
+    this.config = { ...guardrail(), hooks: [{ event, matcher, command }] };
+    this.outDir = tmpDir();
+  },
+);
+
+When(/^converting from claude to cursor with the target equal to that home directory$/, function (this: CursorWorld) {
+  this.items = cursorConverter.export(this.outDir, this.config, { homeDir: this.outDir } as Parameters<typeof cursorConverter.export>[2]).items;
+});
+
+Then(
+  /^`hooks\.preToolUse\[0\]\.command` in `\.cursor\/hooks\.json` equals `node "<absolute path>\/\.cursor\/hooks\/harnessport-guard-1\.mjs"`, with the path in double quotes$/,
+  function (this: CursorWorld) {
+    const json = JSON.parse(readText(this.outDir, ".cursor/hooks.json"));
+    assert.equal(json.hooks.preToolUse[0].command, `node "${path.join(this.outDir, WRAPPER_REL)}"`);
+  },
+);
+
+Then(
+  /^converting into any other directory still writes `node \.cursor\/hooks\/harnessport-guard-1\.mjs`$/,
+  function (this: CursorWorld) {
+    const other = tmpDir();
+    cursorConverter.export(other, this.config, {});
+    const json = JSON.parse(readText(other, ".cursor/hooks.json"));
+    assert.equal(json.hooks.preToolUse[0].command, `node ${WRAPPER_REL}`);
+  },
+);

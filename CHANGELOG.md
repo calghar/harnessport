@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Exported shell-free formatters to Cursor as an `afterFileEdit` hook, imported them back, and exported Claude `Bash` deny rules to `.cursor/cli.json`
+
 ## [0.3.0] - 2026-11-06
 
 ### Security

@@ -19,5 +19,5 @@ Feature: cursor-hook-export-honesty
     Given no `.cursor/hooks.json` in the target
     When a Claude project with one PreToolUse guardrail (Bash, command `./guard.sh`) is converted to Cursor
     Then the item for the guardrail has status `exact`
-    And `.cursor/hooks.json` holds one `preToolUse` entry
+    And `.cursor/hooks.json` holds one `beforeShellExecution` entry
     And the process exits with code 0

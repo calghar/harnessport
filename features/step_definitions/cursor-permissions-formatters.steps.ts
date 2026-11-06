@@ -244,17 +244,17 @@ Then(
 );
 
 Then(
-  /^`\.cursor\/hooks\.json` holds a `preToolUse` array and an `afterFileEdit` array$/,
+  /^`\.cursor\/hooks\.json` holds a `beforeShellExecution` array and an `afterFileEdit` array$/,
   function (this: CpfWorld) {
     const { hooks } = readJson(this, HOOKS_JSON);
-    assert.ok(Array.isArray(hooks.preToolUse) && Array.isArray(hooks.afterFileEdit), read(this, HOOKS_JSON));
+    assert.ok(Array.isArray(hooks.beforeShellExecution) && Array.isArray(hooks.afterFileEdit), read(this, HOOKS_JSON));
   },
 );
 
 Then(/^the PreToolUse guardrail's wrapper is still written as before$/, function (this: CpfWorld) {
   const wrapper = ".cursor/hooks/harnessport-guard-1.mjs";
   assert.ok(exists(this, wrapper));
-  assert.equal(readJson(this, HOOKS_JSON).hooks.preToolUse[0].command, `node ${wrapper}`);
+  assert.equal(readJson(this, HOOKS_JSON).hooks.beforeShellExecution[0].command, `node ${wrapper}`);
 });
 
 Then(/^`(\.cursor\/[\w.]+)` keeps its content$/, function (this: CpfWorld, rel: string) {
@@ -290,3 +290,39 @@ When(
     this.items = cursorConverter.export(this.outDir, this.config, { homeDir: this.outDir } as Parameters<typeof cursorConverter.export>[2]).items;
   },
 );
+
+// --- Hook export honesty ---
+
+Given(/^no `\.cursor\/hooks\.json` in the target$/, function (this: CpfWorld) {
+  this.outDir ??= tmpDir();
+});
+
+When(
+  /^a Claude project with one PreToolUse guardrail \(Bash, command `([^`]+)`\) is converted to Cursor(?: without `--force`)?$/,
+  function (this: CpfWorld, command: string) {
+    this.outDir ??= tmpDir();
+    exportInto(this, { ...emptyConfig(), hooks: [{ event: "PreToolUse", matcher: "Bash", command }] });
+  },
+);
+
+Then(
+  /^the item for the guardrail \(kind `(\w+)`, name `(\w+)`\) has status `(\w+)` with a non-empty reason$/,
+  function (this: CpfWorld, kind: string, name: string, status: string) {
+    const item = this.items.find((i) => i.kind === kind && i.name === name);
+    assert.equal(item?.status, status, JSON.stringify(this.items));
+    assert.ok(item?.reason, JSON.stringify(item));
+  },
+);
+
+Then(/^the item for the guardrail has status `(\w+)`$/, function (this: CpfWorld, status: string) {
+  assert.equal(this.items.find((i) => i.kind === "hook")?.status, status, JSON.stringify(this.items));
+});
+
+Then(/^`\.cursor\/hooks\.json` holds one `(\w+)` entry$/, function (this: CpfWorld, event: string) {
+  assert.equal(readJson(this, HOOKS_JSON).hooks[event].length, 1, read(this, HOOKS_JSON));
+});
+
+// A blocked item is the only status that fails the CLI run (exit 2).
+Then(/^the process exits with code (\d+)$/, function (this: CpfWorld, code: string) {
+  assert.equal(this.items.some((i) => i.status === "blocked") ? 2 : 0, Number(code), JSON.stringify(this.items));
+});

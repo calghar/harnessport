@@ -18,11 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Exported the Claude events `SessionStart`, `SessionEnd`, `Stop`, `SubagentStart`, `SubagentStop`, `PreCompact`, `UserPromptSubmit`, `PostToolUse` and `PostToolUseFailure` as wrapped Cursor hooks
+- Mapped wrapper output for these events to Cursor's `continue`, `permission`, `additional_context` and `followup_message` contracts
+- Reported a `PreCompact` guardrail as `blocked`, because Cursor's `preCompact` cannot block
+
 - Exported hooks to Cursor as `.cursor/hooks.json` through Node wrappers
 - Exported shell-free formatters to Cursor as an `afterFileEdit` hook, imported them back, and exported Claude `Bash` deny rules to `.cursor/cli.json`
 
 ### Changed
 
+- Wrapped Cursor `Read` guardrails on `beforeReadFile`, with the read range recovered from the content line count
+- Wrapped Cursor `Write`, `Edit` and `MultiEdit` guardrails on `preToolUse` instead of writing nothing
+- Wrote one wrapper per Cursor event for a matcher that mixes tokens such as `Bash|Read`
+- Cursor Shell guardrails register on `beforeShellExecution` so an `ask` decision prompts the user instead of denying
 - Changed the Claude formatter hook to read the edited path from stdin through
   `.claude/hooks/harnessport-format.mjs`, and kept importing the earlier `$FILEPATH` form
 - Reported `PreToolUse` guardrails on OpenCode as `blocked` and exited `2`, instead of dropping them
@@ -56,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wrong.
 
 ## [0.2.0] - 2026-07-26
+
+### Changed
+
+- Cursor Shell guardrails register on `beforeShellExecution` so an `ask` decision prompts the user instead of denying
 
 ### Security
 

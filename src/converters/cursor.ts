@@ -205,7 +205,7 @@ function exportAgents(
 
 // --- Hooks ---
 
-// Cursor loads other hook events from .claude/settings.json itself, so only preToolUse is written.
+// Events without a Cursor equivalent stay in `.claude/settings.json`, which Cursor loads itself.
 const WRAPPER_TEMPLATE = [
   'import { spawnSync } from "node:child_process";',
   'import { readFileSync } from "node:fs";',
@@ -215,12 +215,45 @@ const WRAPPER_TEMPLATE = [
   "  if (message) process.stderr.write(message + \"\\n\");",
   "  process.exitCode = code;",
   "};",
+  "const run = (input) => {",
+  "  const opts = { input: JSON.stringify(input), encoding: \"utf-8\" };",
+  "  return HOOK.args ? spawnSync(HOOK.command, HOOK.args, opts) : spawnSync(HOOK.command, { ...opts, shell: true });",
+  "};",
+  "const write = (o) => { process.stdout.write(JSON.stringify(o)); };",
+  "const CONTEXT = new Set([\"SessionStart\", \"PostToolUse\", \"PostToolUseFailure\"]);",
+  "function relay(input) {",
+  "  const ev = HOOK.event;",
+  "  const r = run({ ...input, hook_event_name: ev, ...(input.tool_output !== undefined && { tool_response: input.tool_output }) });",
+  "  if (r.error || r.status === null) return end(1, \"harnessport-guard: command did not run: \" + (r.error ? r.error.message : r.signal));",
+  "  if (r.status !== 0 && r.status !== 2) return end(1, \"harnessport-guard: command exited \" + r.status + \"\\n\" + r.stderr);",
+  "  let out = {};",
+  "  const text = r.stdout.trim();",
+  "  if (text !== \"\") { try { const p = JSON.parse(text); if (p && typeof p === \"object\" && !Array.isArray(p)) out = p; } catch (e) { process.stderr.write(text + \"\\n\"); } }",
+  "  const hso = out.hookSpecificOutput && typeof out.hookSpecificOutput === \"object\" ? out.hookSpecificOutput : {};",
+  "  const decision = hso.permissionDecision ?? out.permissionDecision ?? out.decision;",
+  "  const blocked = r.status === 2 || DENY.has(decision);",
+  "  const msg = hso.permissionDecisionReason ?? out.permissionDecisionReason ?? out.reason ?? (r.stderr.trim() || \"blocked by hook\");",
+  "  if (ev === \"UserPromptSubmit\") return write(blocked ? { continue: false, user_message: msg } : { continue: true });",
+  "  if (ev === \"SubagentStart\") return write(blocked ? { permission: \"deny\", user_message: msg } : { permission: \"allow\" });",
+  "  if (ev === \"Stop\" || ev === \"SubagentStop\") { if (blocked) write({ followup_message: msg }); return; }",
+  "  const context = hso.additionalContext ?? out.additionalContext;",
+  "  if (CONTEXT.has(ev) && typeof context === \"string\") write({ additional_context: context });",
+  "}",
   "function main() {",
   "  let input;",
   "  try { input = JSON.parse(readFileSync(0, \"utf-8\")); } catch (e) { return end(1, \"harnessport-guard: stdin is not JSON\"); }",
   "  if (input && input.tool_name === \"Shell\") input.tool_name = \"Bash\";",
-  "  const opts = { input: JSON.stringify(input), encoding: \"utf-8\" };",
-  "  const r = HOOK.args ? spawnSync(HOOK.command, HOOK.args, opts) : spawnSync(HOOK.command, { ...opts, shell: true });",
+  "  if (HOOK.event) return relay(input);",
+  "  const shellEvent = !!input && (input.hook_event_name === \"beforeShellExecution\" || (input.tool_name === undefined && typeof input.command === \"string\"));",
+  "  if (shellEvent) input = { ...input, tool_name: \"Bash\", tool_input: { command: input.command, working_directory: input.cwd } };",
+  "  const lines = (s) => { const n = s.split(\"\\n\").length; return s.endsWith(\"\\n\") ? n - 1 : n; };",
+  "  const readEvent = !!input && (input.hook_event_name === \"beforeReadFile\" || (input.tool_name === undefined && typeof input.file_path === \"string\" && typeof input.content === \"string\"));",
+  "  if (readEvent) {",
+  "    const tool_input = { file_path: input.file_path };",
+  "    try { const got = lines(input.content); if (got < lines(readFileSync(input.file_path, \"utf-8\"))) tool_input.limit = got; } catch (e) { /* unreadable file: no limit */ }",
+  "    input = { ...input, tool_name: \"Read\", tool_input };",
+  "  }",
+  "  const r = run(input);",
   "  if (r.error || r.status === null) return end(1, \"harnessport-guard: command did not run: \" + (r.error ? r.error.message : r.signal));",
   "  if (r.status === 2) return end(2, r.stderr);",
   "  if (r.status !== 0) return end(1, \"harnessport-guard: command exited \" + r.status + \"\\n\" + r.stderr);",
@@ -233,6 +266,7 @@ const WRAPPER_TEMPLATE = [
   "  const hso = out.hookSpecificOutput && typeof out.hookSpecificOutput === \"object\" ? out.hookSpecificOutput : {};",
   "  const decisions = [hso.permissionDecision, out.permissionDecision, out.decision].filter((d) => d !== undefined);",
   "  const reason = hso.permissionDecisionReason ?? out.permissionDecisionReason ?? out.reason;",
+  "  if (shellEvent && decisions.includes(\"ask\") && !decisions.some((d) => d === \"deny\" || d === \"block\")) { const m = reason || \"confirmation required\"; process.stdout.write(JSON.stringify({ permission: \"ask\", user_message: m, agent_message: m })); return; }",
   "  if (decisions.some((d) => DENY.has(d))) return end(2, reason || \"denied by hook\");",
   "  if (decisions.some((d) => !ALLOW.has(d))) return end(2, \"harnessport-guard: unknown decision \" + JSON.stringify(decisions));",
   "  const updated = hso.updatedInput ?? out.updatedInput;",
@@ -242,8 +276,8 @@ const WRAPPER_TEMPLATE = [
   "",
 ].join("\n");
 
-const wrapperSource = (hook: Hook): string =>
-  `const HOOK = ${JSON.stringify({ command: hook.command, ...(hook.args && { args: hook.args }) })};\n${WRAPPER_TEMPLATE}`;
+const wrapperSource = (hook: Hook, event?: string): string =>
+  `const HOOK = ${JSON.stringify({ command: hook.command, ...(hook.args && { args: hook.args }), ...(event && { event }) })};\n${WRAPPER_TEMPLATE}`;
 
 const CURSOR_TOOLS: Record<string, string> = {
   Bash: "Shell",
@@ -260,11 +294,8 @@ const REASON_NODE = "the wrapper needs `node` on PATH";
 const REASON_TWICE =
   "the command runs twice when `.claude/settings.json` also holds it and Third-Party Imports is on";
 const REASON_EDIT = "Cursor `Write` covers both creates and edits";
-const REASON_READ_RANGE =
-  "Cursor does not pass offset or limit to hooks, so a hook that allows ranged reads sees every read as a full read";
-const REASON_NATIVE =
-  "Cursor runs this hook from .claude/settings.json when its Third-Party Imports setting is on, so harnessport writes nothing. If that setting is off, the hook does not run";
-const NATIVE_TOOLS = new Set(["Read", "Write"]);
+const REASON_READ =
+  "the Read range is recovered from the content line count, unverified in Cursor";
 const REASON_STAR = "Cursor tool names other than `Shell` reach the script unrenamed";
 const REASON_HOOKS_REFUSED =
   "`.cursor/hooks.json` or the formatter runner already exists with different content; this formatter was not written";
@@ -287,10 +318,27 @@ function mapMatcher(
     matcher: [...new Set(tokens.map((t) => CURSOR_TOOLS[t]))].join("|"),
     reasons: [
       ...(tokens.some((t) => EDIT_TOKENS.has(t)) ? [REASON_EDIT] : []),
-      ...(tokens.includes("Read") ? [REASON_READ_RANGE] : []),
     ],
   };
 }
+
+type EventSpec = {
+  cursor: string;
+  matcher: "tool" | "type" | "none";
+  status: "exact" | "lossy";
+  reason?: string;
+};
+const HOOK_EVENTS: Record<string, EventSpec> = {
+  SessionStart: { cursor: "sessionStart", matcher: "none", status: "lossy", reason: "Cursor `sessionStart` accepts only `additional_context` and `env` from the hook" },
+  SessionEnd: { cursor: "sessionEnd", matcher: "none", status: "exact" },
+  Stop: { cursor: "stop", matcher: "none", status: "lossy", reason: "a Claude block becomes a `followup_message`, capped by `loop_limit` (default 5)" },
+  SubagentStart: { cursor: "subagentStart", matcher: "type", status: "exact" },
+  SubagentStop: { cursor: "subagentStop", matcher: "type", status: "lossy", reason: "`followup_message` applies on `completed` only and is capped by `loop_limit`" },
+  PreCompact: { cursor: "preCompact", matcher: "none", status: "lossy", reason: "Cursor `preCompact` is an observer and cannot block" },
+  UserPromptSubmit: { cursor: "beforeSubmitPrompt", matcher: "none", status: "lossy", reason: "Cursor `beforeSubmitPrompt` cannot add context to the prompt" },
+  PostToolUse: { cursor: "postToolUse", matcher: "tool", status: "lossy", reason: "Cursor `postToolUse` cannot block the tool result" },
+  PostToolUseFailure: { cursor: "postToolUseFailure", matcher: "tool", status: "lossy", reason: "Cursor `postToolUseFailure` cannot block" },
+};
 
 const FORMAT_RUNNER_REL = `.cursor/hooks/${FORMAT_RUNNER_MARKER}`;
 
@@ -303,11 +351,26 @@ function exportHooks(
   const items: FidelityItem[] = [];
   const files: string[] = [];
   const entries: Array<Record<string, unknown>> = [];
+  const shellEntries: Array<Record<string, unknown>> = [];
   const hooksDir = path.join(rootDir, ".cursor", "hooks");
-  const nativeItems = new Set<FidelityItem>();
+  const readEntries: Array<Record<string, unknown>> = [];
+  const eventEntries: Record<string, Array<Record<string, unknown>>> = {};
+  let written = 0;
+  const emit = (hook: Hook, target: Array<Record<string, unknown>>, matcher?: string, event?: string): void => {
+    written += 1;
+    const wrapper = path.join(hooksDir, `harnessport-guard-${written}.mjs`);
+    if (writeIfNotDry(wrapper, wrapperSource(hook, event), ctx)) files.push(wrapper);
+    target.push({
+      command: userLevel ? `node "${wrapper}"` : `node ${path.relative(rootDir, wrapper)}`,
+      ...(matcher && { matcher }),
+      ...(hook.timeout !== undefined && { timeout: hook.timeout }),
+      ...(hook.failClosed && { failClosed: true }),
+    });
+  };
 
   for (const hook of config.hooks) {
-    if (hook.event !== "PreToolUse") {
+    const spec = HOOK_EVENTS[hook.event];
+    if (hook.event !== "PreToolUse" && !spec) {
       items.push(
         hookStatus(
           hook,
@@ -323,53 +386,72 @@ function exportHooks(
       items.push(hookStatus(hook, "Cursor", `does not accept hooks of dialect "${hook.dialect}"`));
       continue;
     }
+    if (spec) {
+      if (hook.event === "PreCompact" && hook.failClosed) {
+        items.push({ phase: "export", kind: "hook", name: hook.event, status: "blocked", reason: "Cursor `preCompact` cannot block; this guardrail was not written" });
+        continue;
+      }
+      const any = hook.matcher === undefined || hook.matcher === "" || hook.matcher === "*";
+      let matcher: string | undefined;
+      const reasons = spec.reason ? [spec.reason] : [];
+      if (spec.matcher === "type" && !any) matcher = hook.matcher;
+      if (spec.matcher === "tool") {
+        const m = any ? { matcher: undefined, reasons: [REASON_STAR] } : mapMatcher(hook.matcher);
+        if ("blocked" in m) {
+          items.push(hookStatus(hook, "Cursor", `cannot map the matcher token \`${m.blocked}\``));
+          continue;
+        }
+        matcher = any ? undefined : m.matcher;
+        reasons.push(...m.reasons);
+      }
+      const bucket = eventEntries[spec.cursor] ?? [];
+      eventEntries[spec.cursor] = bucket;
+      emit(hook, bucket, matcher, hook.event);
+      items.push({
+        phase: "export",
+        kind: "hook",
+        name: hook.event,
+        status: reasons.length > 0 ? "lossy" : "exact",
+        reason: [...reasons, REASON_NODE, REASON_TWICE].join("; "),
+      });
+      continue;
+    }
     const mapped = mapMatcher(hook.matcher);
     if ("blocked" in mapped) {
       items.push(hookStatus(hook, "Cursor", `cannot map the matcher token \`${mapped.blocked}\``));
       continue;
     }
-    if (mapped.matcher.split("|").every((t) => NATIVE_TOOLS.has(t))) {
-      const item: FidelityItem = {
-        phase: "export",
-        kind: "hook",
-        name: hook.event,
-        status: "lossy",
-        reason: [REASON_NATIVE, ...mapped.reasons].join("; "),
-      };
-      nativeItems.add(item);
-      items.push(item);
-      continue;
+    const tokens = hook.matcher ? hook.matcher.split("|") : [];
+    const hasRead = tokens.includes("Read");
+    const restTokens = tokens.filter((t) => t !== "Read");
+    const rest = (hasRead ? mapMatcher(restTokens.join("|")) : mapped) as { matcher: string; reasons: string[] };
+    if (!hasRead || restTokens.length > 0) {
+      const isShell = rest.matcher === "Shell";
+      emit(hook, isShell ? shellEntries : entries, isShell ? undefined : rest.matcher);
     }
-    const n = entries.length + 1;
-    const wrapper = path.join(hooksDir, `harnessport-guard-${n}.mjs`);
-    if (writeIfNotDry(wrapper, wrapperSource(hook), ctx)) files.push(wrapper);
-    entries.push({
-      command: userLevel
-        ? `node "${wrapper}"`
-        : `node ${path.relative(rootDir, wrapper)}`,
-      matcher: mapped.matcher,
-      ...(hook.timeout !== undefined && { timeout: hook.timeout }),
-      ...(hook.failClosed && { failClosed: true }),
-    });
-    const reasons = [...mapped.reasons, REASON_NODE, REASON_TWICE];
+    if (hasRead) emit(hook, readEntries);
+    const reasons = [
+      ...rest.reasons,
+      ...(hasRead ? [REASON_READ] : []),
+    ];
     items.push({
       phase: "export",
       kind: "hook",
       name: hook.event,
-      status: mapped.reasons.length > 0 ? "lossy" : "exact",
-      reason: reasons.join("; "),
+      status: reasons.length > 0 ? "lossy" : "exact",
+      reason: [...reasons, REASON_NODE, REASON_TWICE].join("; "),
     });
   }
   const formatters = writableFormatters(config);
   items.push(...config.formatters.filter((f) => !formatters.includes(f)).map(formatterItem));
-  if (entries.length === 0 && formatters.length === 0) return { files, items };
+  if (written === 0 && formatters.length === 0) return { files, items };
 
   const stale = (fs.existsSync(hooksDir) ? fs.readdirSync(hooksDir) : []).filter((f) => {
     const m = /^harnessport-guard-(\d+)\.mjs$/.exec(f);
-    return m !== null && Number(m[1]) > entries.length;
+    return m !== null && Number(m[1]) > written;
   });
   if (stale.length > 0) {
-    const last = items.filter((i) => !nativeItems.has(i) && (i.status === "exact" || i.status === "lossy")).at(-1);
+    const last = items.filter((i) => (i.status === "exact" || i.status === "lossy")).at(-1);
     if (last) last.reason += `; stale wrapper files remain and are not referenced: ${stale.join(", ")}`;
   }
 
@@ -390,6 +472,9 @@ function exportHooks(
     version: 1,
     hooks: {
       ...(entries.length > 0 && { preToolUse: entries }),
+      ...(shellEntries.length > 0 && { beforeShellExecution: shellEntries }),
+      ...(readEntries.length > 0 && { beforeReadFile: readEntries }),
+      ...eventEntries,
       ...(formatEntries.length > 0 && { afterFileEdit: formatEntries }),
     },
   };
@@ -397,7 +482,7 @@ function exportHooks(
   if (hooksWritten) files.push(filePath);
   else {
     for (const item of items) {
-      if (item.kind === "hook" && !nativeItems.has(item) && (item.status === "exact" || item.status === "lossy")) {
+      if (item.kind === "hook" && (item.status === "exact" || item.status === "lossy")) {
         item.status = "blocked";
         item.reason = REASON_GUARD_REFUSED;
       }

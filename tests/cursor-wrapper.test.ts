@@ -22,8 +22,7 @@ const guard = (extra: Partial<Hook> = {}): Hook => ({
 });
 
 /** Exports a wrapper around `stub` (a node script) and runs it with `stdin`. */
-function runWith(stub: string | undefined, stdin = SHELL, hook: Partial<Hook> = {}) {
-  const dir = tmpDir();
+function runWith(stub: string | undefined, stdin = SHELL, hook: Partial<Hook> = {}, dir = tmpDir()) {
   if (stub !== undefined) fs.writeFileSync(path.join(dir, "stub.mjs"), stub);
   cursorConverter.export(dir, configWith(guard(hook)), {});
   const r = spawnSync("node", [WRAPPER], { cwd: dir, input: stdin, encoding: "utf-8" });
@@ -74,6 +73,73 @@ describe("Cursor wrapper", () => {
   });
 });
 
+const SHELL_EVENT = JSON.stringify({ command: "ls", cwd: "/w", workspace_roots: ["/w"], hook_event_name: "beforeShellExecution" });
+const lines = (n: number): string => `${Array.from({ length: n }, (_, i) => `l${i}`).join("\n")}\n`;
+const SEEN_STUB = 'import { readFileSync, writeFileSync } from "node:fs";writeFileSync("seen.json", readFileSync(0, "utf-8"));';
+const asking = printing(JSON.stringify({ hookSpecificOutput: { permissionDecision: "ask", permissionDecisionReason: "confirm rm" } }));
+
+describe("Cursor beforeShellExecution", () => {
+  it("registers a Shell-only hook without a matcher and keeps Shell|Grep on preToolUse", () => {
+    const dir = tmpDir();
+    cursorConverter.export(dir, configWith(guard({ matcher: "Bash|Grep" }), guard()), {});
+    expect(JSON.parse(read(dir, ".cursor/hooks.json"))).toEqual({
+      version: 1,
+      hooks: {
+        preToolUse: [{ command: `node ${WRAPPER}`, matcher: "Shell|Grep" }],
+        beforeShellExecution: [{ command: "node .cursor/hooks/harnessport-guard-2.mjs" }],
+      },
+    });
+  });
+
+  it("answers ask with the permission-ask JSON and exit 0", () => {
+    const r = runWith(asking, SHELL_EVENT);
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ permission: "ask", user_message: "confirm rm", agent_message: "confirm rm" });
+  });
+
+  it("still denies ask for a preToolUse payload", () => {
+    const r = runWith(asking);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+  });
+
+  it("hands the hook a Bash payload built from the shell event", () => {
+    const stub = 'import { readFileSync, writeFileSync } from "node:fs";writeFileSync("seen.json", readFileSync(0, "utf-8"));';
+    const r = runWith(stub, SHELL_EVENT);
+    expect(JSON.parse(fs.readFileSync(path.join(r.dir, "seen.json"), "utf-8"))).toEqual({
+      command: "ls", cwd: "/w", workspace_roots: ["/w"], hook_event_name: "beforeShellExecution",
+      tool_name: "Bash", tool_input: { command: "ls", working_directory: "/w" },
+    });
+  });
+});
+
+describe("Cursor beforeReadFile", () => {
+  const seenLimit = (fileLines: number | undefined, contentLines: number): number | undefined => {
+    const dir = tmpDir();
+    const file = path.join(dir, "big.txt");
+    if (fileLines !== undefined) fs.writeFileSync(file, lines(fileLines));
+    const payload = JSON.stringify({ hook_event_name: "beforeReadFile", file_path: file, content: lines(contentLines) });
+    const r = runWith(SEEN_STUB, payload, { matcher: "Read" }, dir);
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ permission: "allow" });
+    const seen = JSON.parse(fs.readFileSync(path.join(dir, "seen.json"), "utf-8"));
+    expect(seen.tool_name).toBe("Read");
+    expect(seen.tool_input.file_path).toBe(file);
+    return seen.tool_input.limit;
+  };
+
+  it("sets limit for a ranged read", () => expect(seenLimit(600, 10)).toBe(10));
+  it("sets no limit for a full read", () => expect(seenLimit(600, 600)).toBeUndefined());
+  it("sets no limit when the file is unreadable", () => expect(seenLimit(undefined, 10)).toBeUndefined());
+
+  it("exits 2 with the reason when the hook denies", () => {
+    const deny = printing(JSON.stringify({ hookSpecificOutput: { permissionDecision: "deny", permissionDecisionReason: "too big" } }));
+    const r = runWith(deny, JSON.stringify({ hook_event_name: "beforeReadFile", file_path: "/x", content: "a" }), { matcher: "Read" });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("too big");
+  });
+});
+
 const read = (dir: string, rel: string) => fs.readFileSync(path.join(dir, rel), "utf-8");
 
 describe("Cursor hook export honesty", () => {
@@ -114,7 +180,7 @@ describe("Cursor hook export honesty", () => {
     const r = convert(claudeProject(), target);
     expect(r.status).toBe(0);
     expect(hookItem(r.stdout)?.status).toBe("exact");
-    expect(JSON.parse(read(target, ".cursor/hooks.json")).hooks.preToolUse).toHaveLength(1);
+    expect(JSON.parse(read(target, ".cursor/hooks.json")).hooks.beforeShellExecution).toHaveLength(1);
   }, 60_000);
 });
 
@@ -126,7 +192,7 @@ describe("Cursor hook export", () => {
     const first = cursorConverter.export(dir, config, {});
     expect(JSON.parse(read(dir, ".cursor/hooks.json"))).toEqual({
       version: 1,
-      hooks: { preToolUse: [{ command: `node ${WRAPPER}`, matcher: "Shell", timeout: 10, failClosed: true }] },
+      hooks: { beforeShellExecution: [{ command: `node ${WRAPPER}`, timeout: 10, failClosed: true }] },
     });
     expect(read(dir, WRAPPER)).toContain("./guard.sh");
     expect(first.items.find((i) => i.kind === "hook")?.reason).toMatch(/node.*runs twice/);
@@ -147,8 +213,8 @@ describe("Cursor hook export", () => {
     const config = claudeConverter.import(src);
     const out = tmpDir();
     cursorConverter.export(out, config, {});
-    expect(JSON.parse(read(out, ".cursor/hooks.json")).hooks.preToolUse[0])
-      .toEqual({ command: `node ${WRAPPER}`, matcher: "Shell", timeout: 10, failClosed: true });
+    expect(JSON.parse(read(out, ".cursor/hooks.json")).hooks.beforeShellExecution[0])
+      .toEqual({ command: `node ${WRAPPER}`, timeout: 10, failClosed: true });
     expect(read(out, WRAPPER)).toContain("./guard.sh");
     const before = [read(out, ".cursor/hooks.json"), read(out, WRAPPER)];
     cursorConverter.export(out, config, {});
@@ -158,7 +224,6 @@ describe("Cursor hook export", () => {
   it("maps supported matchers and blocks unsupported ones without writing", () => {
     const mapped: Array<[string | undefined, string, string]> = [
       ["Bash|Edit", "Shell|Write", "lossy"],
-      ["Bash|Read", "Shell|Read", "lossy"],
       ["*", "*", "lossy"],
     ];
     for (const [matcher, expected, status] of mapped) {
@@ -176,30 +241,32 @@ describe("Cursor hook export", () => {
     }
   });
 
-  it("writes nothing for a Read or Write guardrail that Cursor runs natively", () => {
+  it("wraps a Write guardrail on preToolUse and a Read guardrail on beforeReadFile", () => {
     const dir = tmpDir();
-    const { items } = cursorConverter.export(dir, configWith(guard({ matcher: "Read|Write" })), {});
-    expect(fs.existsSync(path.join(dir, ".cursor"))).toBe(false);
-    const item = items.find((i) => i.kind === "hook");
-    expect(item?.status).toBe("lossy");
-    expect(item?.reason).toContain("Third-Party Imports");
-    expect(item?.reason).toContain("does not run");
-    expect(item?.reason).toContain("offset or limit");
+    const { items } = cursorConverter.export(dir, configWith(guard({ matcher: "Write" }), guard({ matcher: "Read" })), {});
+    expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks).toEqual({
+      preToolUse: [{ command: `node ${WRAPPER}`, matcher: "Write" }],
+      beforeReadFile: [{ command: "node .cursor/hooks/harnessport-guard-2.mjs" }],
+    });
+    const hooks = items.filter((i) => i.kind === "hook");
+    expect(hooks[0]?.status).toBe("exact");
+    expect(hooks[1]?.status).toBe("lossy");
+    expect(hooks[1]?.reason).toContain("content line count");
   });
 
   it("numbers wrappers over written hooks only", () => {
     const dir = tmpDir();
     cursorConverter.export(dir, configWith(guard({ matcher: "Write" }), guard()), {});
     expect(fs.existsSync(path.join(dir, WRAPPER))).toBe(true);
-    expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks.preToolUse).toHaveLength(1);
+    expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks.beforeShellExecution).toHaveLength(1);
   });
 
   it("keeps Bash and no-matcher output byte-identical to before", () => {
     const sha = (dir: string, rel: string) => createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex");
     const dir = tmpDir();
     const { items } = cursorConverter.export(dir, configWith(guard({ command: "./guard.sh" })), {});
-    expect(sha(dir, WRAPPER)).toBe("b511e05abf278527511691ca9a582c47ace152a1282b276fae463b996c771241");
-    expect(sha(dir, ".cursor/hooks.json")).toBe("954581d9f698edf7ee47bdfad1d167caf3b4df03596a669c1a48a852a73473c0");
+    expect(sha(dir, WRAPPER)).toBe("a0901fb7367397bcfa6e3e612d10abcb46be1284d4e40a4c123f5ea0852209b7");
+    expect(sha(dir, ".cursor/hooks.json")).toBe("e7a3f206398f492486d2ea88123a226600aac2fe3ad231c6a3fa23f78219af67");
     expect(items.find((i) => i.kind === "hook")?.status).toBe("exact");
 
     const bare = tmpDir();
@@ -209,13 +276,17 @@ describe("Cursor hook export", () => {
     expect(bareItems.find((i) => i.kind === "hook")?.status).toBe("lossy");
   });
 
-  it("keeps the wrapper for Bash|Read and reports the lost offset and limit", () => {
+  it("writes one wrapper per Cursor event for Bash|Read and merges the reasons", () => {
     const dir = tmpDir();
-    const { items } = cursorConverter.export(dir, configWith(guard({ matcher: "Bash|Read" })), {});
-    expect(fs.existsSync(path.join(dir, WRAPPER))).toBe(true);
-    const item = items.find((i) => i.kind === "hook");
-    expect(item?.status).toBe("lossy");
-    expect(item?.reason).toContain("offset or limit");
+    const { items } = cursorConverter.export(dir, configWith(guard({ matcher: "Bash|Read", timeout: 5, failClosed: true })), {});
+    expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks).toEqual({
+      beforeShellExecution: [{ command: `node ${WRAPPER}`, timeout: 5, failClosed: true }],
+      beforeReadFile: [{ command: "node .cursor/hooks/harnessport-guard-2.mjs", timeout: 5, failClosed: true }],
+    });
+    const hooks = items.filter((i) => i.kind === "hook");
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0]?.status).toBe("lossy");
+    expect(hooks[0]?.reason).toContain("content line count");
   });
 
   it("quotes the absolute wrapper path when the home directory contains a space", () => {
@@ -223,11 +294,111 @@ describe("Cursor hook export", () => {
     fs.mkdirSync(home);
     fs.writeFileSync(path.join(home, "stub.mjs"), "");
     cursorConverter.export(home, configWith(guard()), { homeDir: home } as ExportOptions);
-    const command: string = JSON.parse(read(home, ".cursor/hooks.json")).hooks.preToolUse[0].command;
+    const command: string = JSON.parse(read(home, ".cursor/hooks.json")).hooks.beforeShellExecution[0].command;
     const wrapperPath = path.join(home, WRAPPER);
     expect(command).toBe(`node "${wrapperPath}"`);
     expect(fs.existsSync(wrapperPath)).toBe(true);
     const r = spawnSync(command, { shell: true, cwd: home, input: SHELL, encoding: "utf-8" });
     expect(r.status).toBe(0);
+  });
+
+  describe("other hook events", () => {
+    const EVENTS: Array<[string, string, string?]> = [
+      ["SessionStart", "sessionStart"], ["SessionEnd", "sessionEnd"], ["Stop", "stop"],
+      ["SubagentStart", "subagentStart"], ["SubagentStop", "subagentStop"], ["PreCompact", "preCompact"],
+      ["UserPromptSubmit", "beforeSubmitPrompt"], ["PostToolUse", "postToolUse", "Shell"],
+      ["PostToolUseFailure", "postToolUseFailure", "Shell"],
+    ];
+    const hookFor = (event: string, extra: Partial<Hook> = {}): Hook => ({ event, command: "node stub.mjs", ...extra });
+    const wrapperOut = (event: string, stub: string, stdin: Record<string, unknown> = {}) => {
+      const dir = tmpDir();
+      fs.writeFileSync(path.join(dir, "stub.mjs"), stub);
+      cursorConverter.export(dir, configWith(hookFor(event)), {});
+      const r = spawnSync("node", [WRAPPER], { cwd: dir, input: JSON.stringify(stdin), encoding: "utf-8" });
+      return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+    };
+
+    it.each(EVENTS)("%s is written under %s", (event, cursor, matcher) => {
+      const dir = tmpDir();
+      const { items } = cursorConverter.export(dir, configWith(hookFor(event, matcher ? { matcher: "Bash" } : {})), {});
+      const entry = JSON.parse(read(dir, ".cursor/hooks.json")).hooks[cursor];
+      expect(entry).toEqual([{ command: "node .cursor/hooks/harnessport-guard-1.mjs", ...(matcher && { matcher }) }]);
+      const item = items.find((i) => i.name === event);
+      expect(item?.status).toBe(event === "SessionEnd" || event === "SubagentStart" ? "exact" : "lossy");
+      expect(item?.reason).toContain("Third-Party Imports");
+    });
+
+    it("keeps the fidelity keywords", () => {
+      const reason = (event: string) => cursorConverter.export(tmpDir(), configWith(hookFor(event)), {}).items[0].reason;
+      expect(reason("Stop")).toContain("loop_limit");
+      expect(reason("SubagentStop")).toContain("loop_limit");
+      expect(reason("PreCompact")).toContain("observer");
+    });
+
+    it("writes no matcher for sessionStart and passes a subagent type through", () => {
+      const dir = tmpDir();
+      cursorConverter.export(dir, configWith(hookFor("SessionStart", { matcher: "x" }), hookFor("SubagentStop", { matcher: "explore" })), {});
+      const hooks = JSON.parse(read(dir, ".cursor/hooks.json")).hooks;
+      expect(hooks.sessionStart[0]).not.toHaveProperty("matcher");
+      expect(hooks.subagentStop[0].matcher).toBe("explore");
+    });
+
+    it("blocks a PreCompact guardrail, drops Notification and blocks PermissionRequest", () => {
+      const dir = tmpDir();
+      const { items } = cursorConverter.export(
+        dir,
+        configWith(hookFor("PreCompact", { failClosed: true }), hookFor("Notification"), hookFor("PermissionRequest")),
+        {},
+      );
+      expect(items.map((i) => i.status)).toEqual(["blocked", "dropped", "blocked"]);
+      expect(fs.existsSync(path.join(dir, ".cursor/hooks.json"))).toBe(false);
+    });
+
+    it("maps beforeSubmitPrompt deny and allow", () => {
+      const deny = wrapperOut("UserPromptSubmit", printing("", "no secrets", 2));
+      expect(deny.status).toBe(0);
+      expect(JSON.parse(deny.stdout)).toEqual({ continue: false, user_message: "no secrets" });
+      const json = wrapperOut("UserPromptSubmit", printing(JSON.stringify({ decision: "block", reason: "nope" })));
+      expect(JSON.parse(json.stdout)).toEqual({ continue: false, user_message: "nope" });
+      expect(JSON.parse(wrapperOut("UserPromptSubmit", printing("")).stdout)).toEqual({ continue: true });
+    });
+
+    it("maps additionalContext to additional_context", () => {
+      const out = printing(JSON.stringify({ hookSpecificOutput: { additionalContext: "hello" } }));
+      for (const event of ["SessionStart", "PostToolUse", "PostToolUseFailure"]) {
+        expect(JSON.parse(wrapperOut(event, out).stdout), event).toEqual({ additional_context: "hello" });
+      }
+      expect(wrapperOut("PostToolUse", printing("")).stdout).toBe("");
+    });
+
+    it("maps a Stop block to followup_message and allow to nothing", () => {
+      for (const event of ["Stop", "SubagentStop"]) {
+        const block = wrapperOut(event, printing(JSON.stringify({ decision: "block", reason: "keep going" })));
+        expect(JSON.parse(block.stdout), event).toEqual({ followup_message: "keep going" });
+        expect(wrapperOut(event, printing("")).stdout, event).toBe("");
+      }
+    });
+
+    it("maps a subagentStart deny and allow", () => {
+      expect(JSON.parse(wrapperOut("SubagentStart", printing("", "no", 2)).stdout)).toEqual({ permission: "deny", user_message: "no" });
+      expect(JSON.parse(wrapperOut("SubagentStart", printing("")).stdout)).toEqual({ permission: "allow" });
+    });
+
+    it("prints nothing for sessionEnd and preCompact, exits 1 for a crash", () => {
+      for (const event of ["SessionEnd", "PreCompact"]) {
+        const r = wrapperOut(event, printing(JSON.stringify({ hookSpecificOutput: { additionalContext: "x" } })));
+        expect([r.status, r.stdout], event).toEqual([0, ""]);
+      }
+      expect(wrapperOut("SessionEnd", printing("", "", 1)).status).toBe(1);
+    });
+
+    it("sends Claude field names to the command", () => {
+      const seen = 'import{readFileSync,writeFileSync}from"node:fs";writeFileSync("seen.json",readFileSync(0,"utf-8"));';
+      const dir = tmpDir();
+      fs.writeFileSync(path.join(dir, "stub.mjs"), seen);
+      cursorConverter.export(dir, configWith(hookFor("PostToolUse")), {});
+      spawnSync("node", [WRAPPER], { cwd: dir, input: JSON.stringify({ tool_name: "Shell", tool_output: "x" }), encoding: "utf-8" });
+      expect(JSON.parse(read(dir, "seen.json"))).toMatchObject({ tool_name: "Bash", tool_response: "x", hook_event_name: "PostToolUse" });
+    });
   });
 });

@@ -114,13 +114,13 @@ Feature: cursor-permissions-formatters
     And the import items hold a dropped hook item for `afterFileEdit`
 
   # Requirement: Cursor hooks file holds both events in one write
-  # The Cursor exporter SHALL write `.cursor/hooks.json` once, holding `preToolUse` entries and `afterFileEdit` entries together.
+  # The Cursor exporter SHALL write `.cursor/hooks.json` once, holding guardrail entries (`preToolUse` and `beforeShellExecution`) and `afterFileEdit` entries together.
 
   @requirement_cursor_hooks_file_holds_both_events_in_one_write
   Scenario: Guardrails and formatters share one hooks file
     Given a canonical config with one PreToolUse guardrail and one shell-free formatter
     When the Cursor exporter exports the config into an empty project
-    Then `.cursor/hooks.json` holds a `preToolUse` array and an `afterFileEdit` array
+    Then `.cursor/hooks.json` holds a `beforeShellExecution` array and an `afterFileEdit` array
     And the PreToolUse guardrail's wrapper is still written as before
 
   # Requirement: Existing Cursor permission and hook files are never clobbered

@@ -1,13 +1,13 @@
 Feature: cursor-hook-wrapper
 
   # Requirement: Claude guardrails export to Cursor through a generated Node wrapper
-  # For each `PreToolUse` hook of dialect `claude` that Cursor does not run natively (see `cursor-native-hooks`), the Cursor exporter SHALL write one wrapper file `.cursor/hooks/harnessport-guard-<n>.mjs`, where `<n>` counts written wrappers from `1` in config order. It SHALL write `.cursor/hooks.json` as `{version: 1, hooks: {preToolUse: [<entry>]}}`. Each entry is `{command: "node .cursor/hooks/harnessport-guard-<n>.mjs", matcher, timeout?, failClosed?}`. `timeout` equals the hook `timeout` in seconds. `failClosed: true` is written only when the hook has `failClosed: true`. The item of kind `hook` names `PreToolUse`, and its reason states that the wrapper needs `node` on `PATH`. The Cursor exporter SHALL NOT write `.claude/settings.json`. An existing `.cursor/hooks.json` or `.claude/hooks/harnessport-format.mjs` with different content SHALL be reported `blocked` unless `--force` is given. A `harnessport-guard-<n>.mjs` file with `<n>` above the written count SHALL be named in the item reason.
+  # For each `PreToolUse` hook of dialect `claude` (a `Read` token writes its own `beforeReadFile` wrapper, see `cursor-native-hooks`), the Cursor exporter SHALL write one wrapper file `.cursor/hooks/harnessport-guard-<n>.mjs`, where `<n>` counts written wrappers from `1` in config order. It SHALL write `.cursor/hooks.json` with `hooks.beforeShellExecution` for each hook whose mapped matcher is exactly `Shell` and `hooks.preToolUse` for every other hook, omitting an empty array. `<n>` is one counter across both arrays. A `preToolUse` entry is `{command: "node .cursor/hooks/harnessport-guard-<n>.mjs", matcher, timeout?, failClosed?}`; a `beforeShellExecution` entry has the same keys without `matcher`. `timeout` equals the hook `timeout` in seconds. `failClosed: true` is written only when the hook has `failClosed: true`. The item of kind `hook` names `PreToolUse`, and its reason states that the wrapper needs `node` on `PATH`. The Cursor exporter SHALL NOT write `.claude/settings.json`. An existing `.cursor/hooks.json` or `.claude/hooks/harnessport-format.mjs` with different content SHALL be reported `blocked` unless `--force` is given. A `harnessport-guard-<n>.mjs` file with `<n>` above the written count SHALL be named in the item reason.
 
   @requirement_claude_guardrails_export_to_cursor_through_a_generated_node_wrapper
-  Scenario: A claude Bash guardrail becomes a Cursor preToolUse Shell entry
+  Scenario: A claude Bash guardrail becomes a Cursor beforeShellExecution entry
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh", timeout: 10, failClosed: true}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {preToolUse: [{command: "node .cursor/hooks/harnessport-guard-1.mjs", matcher: "Shell", timeout: 10, failClosed: true}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeShellExecution: [{command: "node .cursor/hooks/harnessport-guard-1.mjs", timeout: 10, failClosed: true}]}}`
     And the file `.cursor/hooks/harnessport-guard-1.mjs` exists and contains the string `./guard.sh`
     And the item of kind `hook` named `PreToolUse` has status `exact` and its reason names `node`
     And no file `.claude/settings.json` is written
@@ -16,14 +16,14 @@ Feature: cursor-hook-wrapper
   Scenario: A user-level target writes absolute wrapper paths
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh"}` and a home directory passed to the exporter
     When converting from claude to cursor with the target equal to that home directory
-    Then `hooks.preToolUse[0].command` in `.cursor/hooks.json` equals `node "<absolute path>/.cursor/hooks/harnessport-guard-1.mjs"`, with the path in double quotes
+    Then `hooks.beforeShellExecution[0].command` in `.cursor/hooks.json` equals `node "<absolute path>/.cursor/hooks/harnessport-guard-1.mjs"`, with the path in double quotes
     And converting into any other directory still writes `node .cursor/hooks/harnessport-guard-1.mjs`
 
   @requirement_claude_guardrails_export_to_cursor_through_a_generated_node_wrapper
   Scenario: A guardrail without failClosed gets no failClosed key
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
-    Then `hooks.preToolUse[0]` in `.cursor/hooks.json` has no `failClosed` key and no `timeout` key
+    Then `hooks.beforeShellExecution[0]` in `.cursor/hooks.json` has no `failClosed` key and no `timeout` key
 
   @requirement_claude_guardrails_export_to_cursor_through_a_generated_node_wrapper
   Scenario: Re-running the conversion is idempotent
@@ -40,7 +40,7 @@ Feature: cursor-hook-wrapper
     And an item names `.cursor/hooks.json` with status `blocked`
 
   # Requirement: Cursor matchers and events are mapped or reported
-  # The Cursor exporter SHALL map each `|` token of a guardrail matcher as follows: `Bash` to `Shell`, `Read` to `Read`, `Write` to `Write`, `Grep` to `Grep`, `Edit` and `MultiEdit` to `Write`. Duplicate results are written once. A matcher of `*`, empty or absent maps to `*`. An `Edit` or `MultiEdit` token SHALL make the item `lossy`, with a reason stating that Cursor `Write` covers both creates and edits. A `*` matcher SHALL make the item `lossy`, with a reason stating that Cursor tool names other than `Shell` reach the script unrenamed. Any other token, and any matcher other than a lone `*` that contains a character outside letters, digits, `_` and `|`, SHALL make the item `blocked`, with a reason naming the token. If any matcher token is unmapped, the item is `blocked` and no `lossy` reason is added. An empty or absent matcher is `lossy` under the `*` reason. A `PermissionRequest` or `UserPromptSubmit` guardrail SHALL be reported `blocked`. A non-guardrail hook SHALL be reported `dropped`, with the reason: "Cursor runs this hook only if `.claude/settings.json` holds it and Third-Party Imports is on."
+  # The Cursor exporter SHALL map each `|` token of a guardrail matcher as follows: `Bash` to `Shell`, `Read` to `beforeReadFile` (see `cursor-native-hooks`), `Write` to `Write`, `Grep` to `Grep`, `Edit` and `MultiEdit` to `Write`. Duplicate results are written once. A matcher of `*`, empty or absent maps to `*`. An `Edit` or `MultiEdit` token SHALL make the item `lossy`, with a reason stating that Cursor `Write` covers both creates and edits. A `*` matcher SHALL make the item `lossy`, with a reason stating that Cursor tool names other than `Shell` reach the script unrenamed. Any other token, and any matcher other than a lone `*` that contains a character outside letters, digits, `_` and `|`, SHALL make the item `blocked`, with a reason naming the token. If any matcher token is unmapped, the item is `blocked` and no `lossy` reason is added. An empty or absent matcher is `lossy` under the `*` reason. A `PermissionRequest` or `UserPromptSubmit` guardrail SHALL be reported `blocked`. A non-guardrail hook SHALL be reported `dropped`, with the reason: "Cursor runs this hook only if `.claude/settings.json` holds it and Third-Party Imports is on."
 
   @requirement_cursor_matchers_and_events_are_mapped_or_reported
   Scenario: A Bash|Edit matcher becomes Shell|Write and is lossy
@@ -70,24 +70,17 @@ Feature: cursor-hook-wrapper
     Then the item of kind `hook` named `PermissionRequest` has status `blocked`
 
   @requirement_cursor_matchers_and_events_are_mapped_or_reported
-  Scenario: A UserPromptSubmit guardrail is blocked
-    Given a canonical config holding a hook `{event: "UserPromptSubmit", command: "./prompt.sh"}`
+  Scenario: A Notification hook is dropped
+    Given a canonical config holding a hook `{event: "Notification", command: "./note.sh"}`
     When converting from claude to cursor
-    Then the item of kind `hook` named `UserPromptSubmit` has status `blocked`
-
-  @requirement_cursor_matchers_and_events_are_mapped_or_reported
-  Scenario: A PostToolUse hook is dropped
-    Given a canonical config holding a hook `{event: "PostToolUse", matcher: "Bash", command: "./log.sh"}`
-    When converting from claude to cursor
-    Then the item of kind `hook` named `PostToolUse` has status `dropped` and its reason names Third-Party Imports
+    Then the item of kind `hook` named `Notification` has status `dropped` and its reason names Third-Party Imports
     And the process exits `0`
 
   @requirement_cursor_matchers_and_events_are_mapped_or_reported
-  Scenario: A copilot PostToolUse hook exported to cursor is dropped with a Claude-source reason
+  Scenario: A copilot PostToolUse hook exported to cursor is dropped as another dialect
     Given a canonical config holding a hook `{event: "PostToolUse", command: "./log.sh", dialect: "copilot"}`
     When converting from copilot to cursor
-    Then the item of kind `hook` named `PostToolUse` has status `dropped`
-    And its reason names `.claude/settings.json`
+    Then the item of kind `hook` named `PostToolUse` has status `dropped` and its reason names `dialect`
 
   # Requirement: The wrapper renames `Shell` to `Bash`
   # The wrapper SHALL read Cursor's stdin JSON, replace `tool_name` `Shell` with `Bash`, and leave every other field unchanged. It SHALL run the original command with that JSON on stdin, from the wrapper's working directory, with the inherited environment. A hook with `args` runs as `command` plus `args` without a shell. A hook without `args` runs `command` through the platform shell.
@@ -104,8 +97,8 @@ Feature: cursor-hook-wrapper
     When the wrapper is run with stdin `{"tool_name": "Write", "tool_input": {"file_path": "/x"}}`
     Then `seen.json` holds `tool_name` equal to `Write`
 
-  # Requirement: The wrapper maps the command's result to Cursor's preToolUse contract
-  # The wrapper SHALL map the original command's result as follows. The decision SHALL be read from `hookSpecificOutput.permissionDecision`, then top-level `permissionDecision`, then legacy `decision`. `deny`, `ask` and `block` exit `2`. `allow` and `approve` allow. Valid JSON that is not an object exits `2`. | Command result | Wrapper stdout | Wrapper exit | |---|---|---| | exit `2` | none, command stderr forwarded | `2` | | exit `0`, decision `deny`, `ask` or `block` (any of the three fields) | none, `permissionDecisionReason` or `reason` on stderr | `2` | | exit `0`, decision `allow` or `approve` | `{"permission":"allow"}` plus `updated_input` when the command gave `updatedInput` | `0` | | exit `0`, empty stdout, or a JSON object with no decision field | `{"permission":"allow"}` | `0` | | exit `0`, stdout that is not JSON | `{"permission":"allow"}`, the command stdout on stderr | `0` | | exit `0`, JSON that is not an object, or a decision value not listed above | none, a reason on stderr | `2` | | any other exit code, or the command cannot start | none, a reason on stderr | `1` | Exit `1` lets Cursor apply its fail-open default, or block when `failClosed: true` is set. This matches Claude, where exit codes other than `0` and `2` do not block unless `onFailure: "block"`.
+  # Requirement: The wrapper maps the command's result to Cursor's preToolUse and beforeShellExecution contracts
+  # The wrapper SHALL map the original command's result as follows. The decision SHALL be read from `hookSpecificOutput.permissionDecision`, then top-level `permissionDecision`, then legacy `decision`. `deny`, `ask` and `block` exit `2`, except that `ask` for a `beforeShellExecution` payload (`hook_event_name` equal to `beforeShellExecution`, or no `tool_name` and a string `command`) writes `{"permission":"ask","user_message":<reason>,"agent_message":<reason>}` and exits `0`. The wrapper builds that payload as `tool_name: "Bash"`, `tool_input: {command, working_directory: cwd}`, keeping every other field. `allow` and `approve` allow. Valid JSON that is not an object exits `2`. | Command result | Wrapper stdout | Wrapper exit | |---|---|---| | exit `2` | none, command stderr forwarded | `2` | | exit `0`, decision `deny`, `ask` or `block` (any of the three fields) | none, `permissionDecisionReason` or `reason` on stderr | `2` | | exit `0`, decision `allow` or `approve` | `{"permission":"allow"}` plus `updated_input` when the command gave `updatedInput` | `0` | | exit `0`, empty stdout, or a JSON object with no decision field | `{"permission":"allow"}` | `0` | | exit `0`, stdout that is not JSON | `{"permission":"allow"}`, the command stdout on stderr | `0` | | exit `0`, JSON that is not an object, or a decision value not listed above | none, a reason on stderr | `2` | | any other exit code, or the command cannot start | none, a reason on stderr | `1` | Exit `1` lets Cursor apply its fail-open default, or block when `failClosed: true` is set. This matches Claude, where exit codes other than `0` and `2` do not block unless `onFailure: "block"`.
 
   @requirement_the_wrapper_maps_the_command_s_result_to_cursor_s_pretooluse_contract
   Scenario: Exit 2 denies
@@ -142,6 +135,12 @@ Feature: cursor-hook-wrapper
     Given a wrapper generated for a command that exits `0` and prints `permissionDecision: "ask"` in `hookSpecificOutput`
     When the wrapper is run with a Shell payload
     Then the wrapper exits `2`
+
+  @requirement_the_wrapper_maps_the_command_s_result_to_cursor_s_pretooluse_contract
+  Scenario: Ask on a beforeShellExecution payload prompts the user
+    Given a wrapper generated for a command that exits `0` and prints `permissionDecision: "ask"` in `hookSpecificOutput`
+    When the wrapper is run with a beforeShellExecution payload
+    Then the wrapper stdout parses to a `permission` of `ask` and the wrapper exits `0`
 
   @requirement_the_wrapper_maps_the_command_s_result_to_cursor_s_pretooluse_contract
   Scenario: Silent success prints an explicit allow

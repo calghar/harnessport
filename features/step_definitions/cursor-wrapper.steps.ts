@@ -175,6 +175,10 @@ When(/^the wrapper is run with a Shell payload$/, function (this: CursorWorld) {
   runWrapper(this, SHELL_PAYLOAD);
 });
 
+When(/^the wrapper is run with a beforeShellExecution payload$/, function (this: CursorWorld) {
+  runWrapper(this, '{"command": "ls", "cwd": "/w", "workspace_roots": ["/w"], "hook_event_name": "beforeShellExecution"}');
+});
+
 When(/^the wrapper is run with stdin `(.+)`$/, function (this: CursorWorld, stdin: string) {
   runWrapper(this, stdin);
 });
@@ -201,9 +205,9 @@ Then(/^no wrapper file is written for it$/, function (this: CursorWorld) {
 });
 
 Then(
-  /^`hooks\.preToolUse\[0\]` in `\.cursor\/hooks\.json` has no `failClosed` key and no `timeout` key$/,
+  /^`hooks\.beforeShellExecution\[0\]` in `\.cursor\/hooks\.json` has no `failClosed` key and no `timeout` key$/,
   function (this: CursorWorld) {
-    const entry = (JSON.parse(readText(this.outDir, ".cursor/hooks.json")) as { hooks: { preToolUse: object[] } }).hooks.preToolUse[0];
+    const entry = (JSON.parse(readText(this.outDir, ".cursor/hooks.json")) as { hooks: { beforeShellExecution: object[] } }).hooks.beforeShellExecution[0];
     assert.ok(!("failClosed" in entry) && !("timeout" in entry), JSON.stringify(entry));
   },
 );
@@ -306,6 +310,11 @@ Then(
   },
 );
 
+Then(/^the wrapper stdout parses to a `permission` of `ask` and the wrapper exits `0`$/, function (this: CursorWorld) {
+  assert.equal(JSON.parse(this.run.stdout).permission, "ask");
+  assert.equal(this.run.status, 0);
+});
+
 // --- User-level target: the wrapper path is absolute ---
 
 Given(
@@ -321,10 +330,10 @@ When(/^converting from claude to cursor with the target equal to that home direc
 });
 
 Then(
-  /^`hooks\.preToolUse\[0\]\.command` in `\.cursor\/hooks\.json` equals `node "<absolute path>\/\.cursor\/hooks\/harnessport-guard-1\.mjs"`, with the path in double quotes$/,
+  /^`hooks\.beforeShellExecution\[0\]\.command` in `\.cursor\/hooks\.json` equals `node "<absolute path>\/\.cursor\/hooks\/harnessport-guard-1\.mjs"`, with the path in double quotes$/,
   function (this: CursorWorld) {
     const json = JSON.parse(readText(this.outDir, ".cursor/hooks.json"));
-    assert.equal(json.hooks.preToolUse[0].command, `node "${path.join(this.outDir, WRAPPER_REL)}"`);
+    assert.equal(json.hooks.beforeShellExecution[0].command, `node "${path.join(this.outDir, WRAPPER_REL)}"`);
   },
 );
 
@@ -334,6 +343,42 @@ Then(
     const other = tmpDir();
     cursorConverter.export(other, this.config, {});
     const json = JSON.parse(readText(other, ".cursor/hooks.json"));
-    assert.equal(json.hooks.preToolUse[0].command, `node ${WRAPPER_REL}`);
+    assert.equal(json.hooks.beforeShellExecution[0].command, `node ${WRAPPER_REL}`);
+  },
+);
+
+// --- Non-PreToolUse events ---
+
+Given(
+  /^a `(\w+)` wrapper generated for a command that exits `(\d+)`, prints `([^`]*)` to stdout and `([^`]*)` to stderr$/,
+  function (this: CursorWorld, event: string, code: string, stdout: string, stderr: string) {
+    this.outDir = tmpDir();
+    fs.writeFileSync(path.join(this.outDir, "stub.mjs"), stubPrinting(stdout, stderr, Number(code)));
+    this.config = guardrail({ event, matcher: undefined, command: "node stub.mjs" });
+    exportCursor(this);
+  },
+);
+
+Given(
+  /^a `(\w+)` wrapper generated for a command that writes its stdin to `seen\.json`$/,
+  function (this: CursorWorld, event: string) {
+    this.outDir = tmpDir();
+    fs.writeFileSync(
+      path.join(this.outDir, "stub.mjs"),
+      'import { readFileSync, writeFileSync } from "node:fs";writeFileSync("seen.json", readFileSync(0, "utf-8"));',
+    );
+    this.config = guardrail({ event, matcher: undefined, command: "node stub.mjs" });
+    exportCursor(this);
+  },
+);
+
+Then(/^`seen\.json` holds `(tool_response|hook_event_name)` equal to `(\w+)`$/, function (this: CursorWorld, key: string, value: string) {
+  assert.equal(JSON.parse(readText(this.outDir, "seen.json"))[key], value);
+});
+
+Given(
+  /^a canonical config holding a hook `\{event: "(\w+)", command: "([^"]+)", failClosed: true\}`$/,
+  function (this: CursorWorld, event: string, command: string) {
+    this.config = guardrail({ event, matcher: undefined, command, failClosed: true });
   },
 );

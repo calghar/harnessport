@@ -274,6 +274,11 @@ function exportCommands(
   return files;
 }
 
+const MCP_FILE = path.join(".github", "mcp.json");
+
+const REASON_PERMISSIONS =
+  "keeps permissions in user-level files (`~/.copilot/permissions-config.json`, `~/.copilot/settings.json`), which harnessport never writes; a repository-committed permission file is not verified";
+
 const PRE_TOOL_USE_LOSSY =
   "Copilot reads top-level `permissionDecision`, not nested `hookSpecificOutput`, so a Claude JSON deny is not enforced, and exit 0 with no output counts as allow";
 
@@ -288,9 +293,9 @@ function planHook(hook: Hook): { item: FidelityItem; key?: string; entry?: Recor
   let lossy: string | undefined;
   if (claude) {
     if (hook.event === "UserPromptSubmit") return refuse("drops the output of config-file `userPromptSubmitted` hooks");
-    if (hook.event === "PermissionRequest") return refuse("has no permission-request hook event");
-    if (hook.failClosed && guardrail) return refuse("cannot make a failing hook block the action");
-    if (hook.failClosed) lossy = "Copilot cannot make a failing hook block the action";
+    if (hook.event === "PermissionRequest") return refuse("has a CLI `permissionRequest` event that harnessport does not map, and Copilot cloud has no such event");
+    if (hook.failClosed && guardrail) return refuse("blocks a `preToolUse` hook on a non-zero exit (exit 2 denies) but a timeout fails open, so a failing hook cannot always block");
+    if (hook.failClosed) lossy = `Copilot runs a failing ${hook.event} hook fail-open: the run continues`;
     else if (hook.event === "PreToolUse") lossy = PRE_TOOL_USE_LOSSY;
     if (hook.event === "PostToolUse" && matcher) {
       const tokens = matcher.split("|");
@@ -357,7 +362,7 @@ export const copilotConverter: Converter = {
       fs.existsSync(path.join(rootDir, ".github", "instructions")) ||
       fs.existsSync(path.join(rootDir, ".github", "agents")) ||
       fs.existsSync(path.join(rootDir, ".github", "skills")) ||
-      fs.existsSync(path.join(rootDir, ".copilot", "mcp-config.json"))
+      fs.existsSync(path.join(rootDir, MCP_FILE))
     );
   },
 
@@ -367,7 +372,7 @@ export const copilotConverter: Converter = {
       agents: importAgents(rootDir),
       skills: importSkillsFromDir(path.join(rootDir, ".github", "skills")),
       commands: importCommands(rootDir),
-      mcpServers: importMcpFromJson(path.join(rootDir, ".copilot", "mcp-config.json")),
+      mcpServers: importMcpFromJson(path.join(rootDir, MCP_FILE)),
       permissions: [],
       hooks: importHooks(rootDir),
       formatters: [],
@@ -393,7 +398,7 @@ export const copilotConverter: Converter = {
       ),
       ...exportCommands(rootDir, config.commands, ctx),
       ...exportMcpToJson(
-        path.join(rootDir, ".copilot", "mcp-config.json"),
+        path.join(rootDir, MCP_FILE),
         config.mcpServers,
         ctx,
       ),
@@ -408,7 +413,7 @@ export const copilotConverter: Converter = {
       ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
       ...hooksOut.items,
       ...config.permissions.map((p) =>
-        permissionStatus(p, copilotConverter.permissionActions, "Copilot"),
+        permissionStatus(p, copilotConverter.permissionActions, "Copilot", REASON_PERMISSIONS),
       ),
     );
 

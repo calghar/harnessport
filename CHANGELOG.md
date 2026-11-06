@@ -29,17 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Wrapped Cursor `Read` guardrails on `beforeReadFile`, with the read range recovered from the content line count
 - Wrapped Cursor `Write`, `Edit` and `MultiEdit` guardrails on `preToolUse` instead of writing nothing
-- Wrote one wrapper per Cursor event for a matcher that mixes tokens such as `Bash|Read`
-- Cursor Shell guardrails register on `beforeShellExecution` so an `ask` decision prompts the user instead of denying
+- Changed a matcher that mixes tokens such as `Bash|Read` to write one wrapper per Cursor event
+- Changed Cursor Shell guardrails to register on `beforeShellExecution`, so an `ask` decision prompts the user instead of denying
 - Changed the Claude formatter hook to read the edited path from stdin through
   `.claude/hooks/harnessport-format.mjs`, and kept importing the earlier `$FILEPATH` form
 - Reported `PreToolUse` guardrails on OpenCode as `blocked` and exited `2`, instead of dropping them
   with a warning, because harnessport does not generate the OpenCode plugin that enforces them
 - **Breaking:** Copilot project MCP servers are read from `.github/mcp.json`; `.copilot/mcp-config.json` is no longer read
 - Allowed a Cursor hook that exits `0` with non-JSON output, and wrote that output to stderr instead of denying the call
-- Stopped writing a Cursor wrapper for a `Read` or `Write` `PreToolUse` hook that Cursor runs from
-  `.claude/settings.json`, and reported any `Read` hook as `lossy` because Cursor drops `offset`
-  and `limit`
 
 ### Fixed
 

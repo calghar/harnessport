@@ -123,10 +123,11 @@ you get your files plus an accurate account of what did not carry.
 **Hook fidelity.** A guardrail is a hook on `PreToolUse`, `PermissionRequest` or `UserPromptSubmit`.
 A target that cannot write or enforce a guardrail reports it `blocked`, and `convert` exits `2`.
 Any other hook it cannot write is `dropped`, and the exit code is unchanged. Cursor runs hooks
-through Node wrappers, and the command runs twice when `.claude/settings.json` also holds it and
-Cursor's Third-Party Imports is on. A `Read` or `Write` guardrail gets no wrapper, because Cursor
-runs it from `.claude/settings.json`. It is `lossy`, and it does not run if that setting is off.
-Cursor does not pass `offset` or `limit` of a `Read` to any hook.
+through Node wrappers. Shell guardrails run on `beforeShellExecution`. A `Read` guardrail runs on
+`beforeReadFile` and is `lossy`. Other tool guardrails run on `preToolUse`. The wrapper recovers the
+`Read` range from the content line count, which is unverified in Cursor. The command runs twice when
+`.claude/settings.json` also holds it and Cursor's Third-Party Imports is on. Turning that setting off
+stops the second run. Cursor has no `Notification` event, so that hook is `dropped`.
 
 ### Check the report rather than trusting it
 

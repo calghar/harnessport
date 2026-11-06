@@ -11,7 +11,6 @@ import * as fs from "node:fs";
 import { claudeConverter } from "./converters/claude.js";
 import { opencodeConverter } from "./converters/opencode.js";
 import { cursorConverter } from "./converters/cursor.js";
-import { windsurfConverter } from "./converters/windsurf.js";
 import { copilotConverter } from "./converters/copilot.js";
 import { codexConverter } from "./converters/codex.js";
 import type { Capability, Converter } from "./converters/types.js";
@@ -22,7 +21,6 @@ export const ALL_CONVERTERS: Converter[] = [
   claudeConverter,
   opencodeConverter,
   cursorConverter,
-  windsurfConverter,
   copilotConverter,
   codexConverter,
 ];

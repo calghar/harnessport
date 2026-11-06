@@ -14,12 +14,6 @@ security posture.
 The distinction between `dropped` and `blocked` SHALL determine the exit code: a target simply
 lacking a concept is ordinary, while a refusal is exceptional.
 
-#### Scenario: A feature the target cannot represent is reported per item
-- **GIVEN** a config holding two agents
-- **WHEN** exporting to windsurf, which has no per-agent tool or model config
-- **THEN** two items of kind `agent` are reported, each naming its agent
-- **AND** neither item has status `blocked`
-
 #### Scenario: Import-side loss enters the same report
 - **WHEN** importing from codex, whose MCP servers live in user-level TOML that is not read
 - **THEN** an item with phase `import` and a reason naming `~/.codex/config.toml` is reported
@@ -38,11 +32,6 @@ lacking a concept is ordinary, while a refusal is exceptional.
 An item SHALL describe what the code actually did. A status of `exact` or `lossy` SHALL NOT be
 reported for content that no code path writes; such content SHALL be reported as `dropped`.
 
-#### Scenario: Agents not written to windsurf are reported dropped, not carried
-- **GIVEN** a config holding two agents
-- **WHEN** exporting to windsurf
-- **THEN** either the emitted files contain both agent bodies, or both items have status `dropped`
-
 #### Scenario: Codex agent reporting matches its emitted output
 - **GIVEN** a config holding two agents
 - **WHEN** exporting to codex
@@ -50,7 +39,7 @@ reported for content that no code path writes; such content SHALL be reported as
 
 #### Scenario: No reason claims a merge that did not happen
 - **GIVEN** a config holding two agents
-- **WHEN** exporting to windsurf or codex
+- **WHEN** exporting to codex
 - **THEN** no item reason states that agent content was merged unless an emitted file contains it
 
 ### Requirement: Exit codes distinguish refusal from ordinary loss
@@ -62,11 +51,6 @@ unknown harness name or an absent source configuration SHALL continue to exit `1
 #### Scenario: A lossy conversion succeeds
 - **GIVEN** a claude config whose hooks cannot be represented by cursor
 - **WHEN** converting from claude to cursor with no blocked items
-- **THEN** the process exits `0`
-
-#### Scenario: A conversion that only drops unsupported concepts succeeds
-- **GIVEN** a claude config holding agents and no deny permissions
-- **WHEN** converting from claude to windsurf, which has no agent config
 - **THEN** the process exits `0`
 
 #### Scenario: A blocked conversion signals failure

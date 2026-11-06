@@ -2,7 +2,7 @@
 
 ### Requirement: Every ordered pair of harnesses converts end to end
 
-For each of the 30 ordered pairs of the six harnesses, importing that harness's fixture and
+For each of the 20 ordered pairs of the five harnesses, importing that harness's fixture and
 exporting to the target SHALL write files to a real directory that the target converter's `detect`
 recognises as its own configuration.
 
@@ -16,33 +16,23 @@ recognises as its own configuration.
 |----------|----------|
 | claude   | opencode |
 | claude   | cursor   |
-| claude   | windsurf |
 | claude   | copilot  |
 | claude   | codex    |
 | opencode | claude   |
 | opencode | cursor   |
-| opencode | windsurf |
 | opencode | copilot  |
 | opencode | codex    |
 | cursor   | claude   |
 | cursor   | opencode |
-| cursor   | windsurf |
 | cursor   | copilot  |
 | cursor   | codex    |
-| windsurf | claude   |
-| windsurf | opencode |
-| windsurf | cursor   |
-| windsurf | copilot  |
-| windsurf | codex    |
 | copilot  | claude   |
 | copilot  | opencode |
 | copilot  | cursor   |
-| copilot  | windsurf |
 | copilot  | codex    |
 | codex    | claude   |
 | codex    | opencode |
 | codex    | cursor   |
-| codex    | windsurf |
 | codex    | copilot  |
 
 #### Scenario: Each importer reads its own fixture
@@ -56,7 +46,6 @@ recognises as its own configuration.
 | claude   |
 | opencode |
 | cursor   |
-| windsurf |
 | copilot  |
 | codex    |
 
@@ -76,8 +65,6 @@ named for each source skill.
 |----------|----------|
 | cursor   | claude   |
 | claude   | codex    |
-| copilot  | windsurf |
-| windsurf | opencode |
 | codex    | cursor   |
 | opencode | copilot  |
 
@@ -91,8 +78,6 @@ named for each source skill.
 |----------|----------|
 | cursor   | claude   |
 | claude   | codex    |
-| copilot  | windsurf |
-| windsurf | opencode |
 | codex    | cursor   |
 | opencode | copilot  |
 
@@ -138,7 +123,6 @@ disappear while every item reads `exact`.
 | opencode | cursor   |
 | cursor   | claude   |
 | cursor   | opencode |
-| windsurf | claude   |
 | copilot  | claude   |
 | copilot  | opencode |
 | codex    | claude   |

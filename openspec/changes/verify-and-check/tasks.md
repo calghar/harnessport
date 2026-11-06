@@ -15,7 +15,7 @@
 - [x] 2.3 `src/compare.ts`: `divergences(configs)` for the pairwise `check` comparison, naming
       `presentIn` and `absentFrom`.
 - [x] 2.4 Regression: `tests/matrix.test.ts` drops its private `inventory` and imports the shared
-      one. All 30 pair assertions must stay green — that is the proof the extraction is faithful.
+      one. All 20 pair assertions must stay green — that is the proof the extraction is faithful.
 
 ## 3. verify
 
@@ -25,7 +25,7 @@
       converter does not detect. Exit `2` on unaccounted loss. Exit `0` otherwise.
 - [x] 3.3 **Safety test:** hash every file under the inspected directory before and after, and
       assert the tree is unchanged. This is the one defect this command must never have.
-- [x] 3.4 Test that all six fixtures verify with exit `0` against several targets — a lossy but
+- [x] 3.4 Test that all five fixtures verify with exit `0` against several targets — a lossy but
       honest conversion passes.
 - [x] 3.5 Test that a conversion with unaccounted loss exits `2` and names the item, using a
       stubbed fidelity report so the case is reachable without reintroducing a defect.

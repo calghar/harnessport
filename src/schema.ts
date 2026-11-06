@@ -10,7 +10,7 @@
 export interface Rule {
   content: string;
   source?: string; // original filename
-  description?: string; // for agent-requested activation (Cursor/Windsurf)
+  description?: string; // for agent-requested activation (Cursor)
   globs?: string; // file-scoped activation pattern
   alwaysApply?: boolean; // always-on activation flag
 }
@@ -101,8 +101,8 @@ export type Feature =
  *             posture, or destroy an existing file. Exceptional: the only status that fails the
  *             run (exit 2).
  *
- * The `dropped`/`blocked` split is what makes the exit code meaningful. Windsurf having no
- * agent concept is ordinary; declining to rewrite a deny rule as an allow is not.
+ * The `dropped`/`blocked` split is what makes the exit code meaningful. Codex having no
+ * command concept is ordinary; declining to rewrite a deny rule as an allow is not.
  *
  * This is the single representation of conversion fidelity: human output and `--json` both
  * render from it, so they cannot disagree.

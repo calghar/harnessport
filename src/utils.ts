@@ -542,7 +542,7 @@ export function permissionStatus(
 
 /**
  * Standard items for features a target cannot represent.
- * Shared by the cursor, windsurf, copilot, and codex exporters.
+ * Shared by the cursor, copilot, and codex exporters.
  *
  * Permissions are handled separately by `permissionStatus`, because they are the one kind
  * whose loss can weaken a security posture.

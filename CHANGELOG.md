@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The Windsurf target. `--to windsurf` and `--from windsurf` now exit `1` with an unknown-harness
+  error, and `list` and `detect` no longer name it. Existing `.windsurf/` files are not touched.
+
 ## [0.2.1] - 2026-07-26
 
 ### Fixed

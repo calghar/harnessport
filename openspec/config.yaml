@@ -14,14 +14,14 @@ context: |
   into a target tool's file layout. Eight feature types cross the boundary: rules, agents,
   skills, commands, MCP servers, permissions, hooks, and formatters.
 
-  Six harnesses are supported: Claude Code, OpenCode, Cursor, Windsurf, GitHub Copilot, and
-  Codex CLI. Conversions that cannot be represented losslessly emit warnings.
+  Five harnesses are supported: Claude Code, OpenCode, Cursor, GitHub Copilot, and Codex CLI.
+  Conversions that cannot be represented losslessly emit warnings.
 
   ## Status
 
   Published as harnessport@0.1.2. Working, with known fidelity defects recorded in the audit:
   permission `deny` rules are not representable in the canonical schema and convert into
-  `allow`; the Windsurf and Codex exporters warn that agents were merged into rules while never
+  `allow`; the Codex exporter warns that agents were merged into rules while never
   writing them; existing target files are overwritten without backup; output-name collisions
   silently drop entries. Treat the current emitted output as behaviour under repair, not as a
   contract to preserve verbatim.
@@ -42,7 +42,7 @@ context: |
     utils.ts              frontmatter, file IO, shared import/export helpers
     converters/
       types.ts            Converter interface: detect / import / export
-      {claude,opencode,cursor,windsurf,copilot,codex}.ts
+      {claude,opencode,cursor,copilot,codex}.ts
   tests/
     fixtures/sample-project/   shared Claude-shaped fixture used by every test
   ```

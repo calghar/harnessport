@@ -1,9 +1,9 @@
 ## Context
 
-`tests/matrix.test.ts` performs a round trip over all 30 pairs and asserts that everything lost is
+`tests/matrix.test.ts` performs a round trip over all 20 pairs and asserts that everything lost is
 named by a fidelity item. That assertion is the project's whole positioning stated as an
 executable property, and building it found three defects on first run. It exists only inside a
-test file, where users cannot reach it and where it only ever runs against six fixtures.
+test file, where users cannot reach it and where it only ever runs against five fixtures.
 
 Constraints:
 
@@ -67,7 +67,7 @@ joined rule text is the property that actually holds and the one users care abou
 
 **4. `check` compares pairwise and reports direction.**
 
-"Present in claude, absent from opencode" is actionable; "these differ" is not. With six possible
+"Present in claude, absent from opencode" is actionable; "these differ" is not. With five possible
 harnesses the pair count is small enough that the full pairwise report stays readable, and a
 repository with more than two or three configured harnesses is rare.
 
@@ -86,17 +86,17 @@ calls any exporter against a user-supplied path. `verify` calls `export` only ag
 
 | Converter | Modified? | Emitted output changes? |
 |---|---|---|
-| claude, opencode, cursor, windsurf, copilot, codex | No | No |
+| claude, opencode, cursor, copilot, codex | No | No |
 
 - [`verify` writes into the user's repository through a path bug] → The export target is the
   return value of `fs.mkdtempSync`, never `dir` or anything derived from it. A scenario asserts
   the inspected directory's file set and contents are unchanged, comparing a recursive hash before
   and after.
 - [Extracting `inventory` out of `tests/matrix.test.ts` changes what that test asserts] → The
-  function moves unmodified and the test imports it. The 30 pair assertions stay green, which is
+  function moves unmodified and the test imports it. The 20 pair assertions stay green, which is
   the regression check.
 - [`check` reports noise on a repository where several harnesses read the same `AGENTS.md`] →
-  Cursor, Windsurf, Copilot, OpenCode, and Codex all import a root `AGENTS.md`, so they agree on
+  Cursor, Copilot, OpenCode, and Codex all import a root `AGENTS.md`, so they agree on
   it rather than diverging. Rule comparison by content makes that agreement visible instead of
   turning file-name differences into false divergence.
 - [Exit `2` from `check` in CI on a repository that legitimately keeps different configs per
@@ -116,5 +116,5 @@ anything that exists.
 
 None. One deliberate limit is recorded rather than left open: neither command compares item
 *contents*, only the set of named items. An agent whose body was mangled but whose name survived
-passes both. Closing that needs per-field normalisation across six harnesses and belongs in its
+passes both. Closing that needs per-field normalisation across five harnesses and belongs in its
 own change.

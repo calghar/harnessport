@@ -7,7 +7,6 @@ import { spawnSync } from "node:child_process";
 import { claudeConverter } from "../src/converters/claude.js";
 import { opencodeConverter } from "../src/converters/opencode.js";
 import { cursorConverter } from "../src/converters/cursor.js";
-import { windsurfConverter } from "../src/converters/windsurf.js";
 import { copilotConverter } from "../src/converters/copilot.js";
 import { codexConverter } from "../src/converters/codex.js";
 import type { Capability, Converter } from "../src/converters/types.js";
@@ -23,7 +22,6 @@ const CONVERTERS: Record<string, Converter> = {
   claude: claudeConverter,
   opencode: opencodeConverter,
   cursor: cursorConverter,
-  windsurf: windsurfConverter,
   copilot: copilotConverter,
   codex: codexConverter,
 };
@@ -81,9 +79,6 @@ describe("Requirement: Every converter declares what it converts", () => {
     ["copilot", "command", "full"],
     ["copilot", "mcp", "full"],
     ["copilot", "hook", "full"],
-    ["windsurf", "agent", "none"],
-    ["windsurf", "mcp", "user-level"],
-    ["windsurf", "command", "full"],
     ["codex", "agent", "user-level"],
     ["codex", "mcp", "user-level"],
     ["codex", "command", "none"],
@@ -120,9 +115,6 @@ describe("Requirement: A declaration disagreeing with export behaviour fails the
   );
 
   it.each([
-    ["windsurf", "agent"],
-    ["windsurf", "mcp"],
-    ["windsurf", "hook"],
     ["cursor", "permission"],
     ["cursor", "hook"],
     ["cursor", "formatter"],
@@ -157,11 +149,6 @@ describe("Requirement: A declaration disagreeing with export behaviour fails the
 });
 
 describe("Requirement: A user-level declaration names the path it lives at", () => {
-  it("Windsurf MCP names the user-level config file", () => {
-    const [item] = itemsOfKind(exportEveryFeature(windsurfConverter), "mcp");
-    expect(item.reason).toContain("~/.codeium/windsurf/mcp_config.json");
-  });
-
   it("Codex agents name the user-level config file", () => {
     const items = itemsOfKind(exportEveryFeature(codexConverter), "agent");
     expect(items.some((i) => i.reason?.includes("~/.codex/config.toml"))).toBe(true);
@@ -191,8 +178,6 @@ describe("Requirement: The list command renders from the declaration", () => {
     ["copilot", "Commands", "✓"],
     ["copilot", "MCP Servers", "✓"],
     ["copilot", "Hooks", "✓"],
-    ["windsurf", "MCP Servers", "~"],
-    ["windsurf", "Agents", "-"],
     ["codex", "Agents", "~"],
     ["codex", "Permissions", "-"],
   ])("%s shows %s as %s", (tool, feature, symbol) => {

@@ -21,7 +21,6 @@ const FIXTURE_DIRS: Record<string, string> = {
   claude: "sample-project",
   opencode: "opencode-project",
   cursor: "cursor-project",
-  windsurf: "windsurf-project",
   copilot: "copilot-project",
   codex: "codex-project",
 };

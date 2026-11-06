@@ -9,9 +9,9 @@ something.
 ## What Changes
 
 - **ADDED** a source fixture per harness — `opencode-project`, `cursor-project`,
-  `windsurf-project`, `copilot-project`, `codex-project` — so the five untested importers are
+  `copilot-project`, `codex-project` — so the four untested importers are
   exercised. `sample-project` remains the Claude fixture.
-- **ADDED** `tests/matrix.test.ts`: all 30 ordered tool pairs, exporting to a real temp directory
+- **ADDED** `tests/matrix.test.ts`: all 20 ordered tool pairs, exporting to a real temp directory
   and re-importing, asserting that the target detects what was written, that rule content and
   skill names survive, that re-running is idempotent, and that every lost item is accounted for by
   a fidelity item.
@@ -42,7 +42,7 @@ something.
 
 ## Blast radius
 
-Established by grep, and by running all 30 pairs against real fixtures before writing this.
+Established by grep, and by running all 20 pairs against real fixtures before writing this.
 
 - `src/converters/opencode.ts:117` `parsePermissions` — the only producer of lowercase permission
   tool names. Consumers of `PermissionEntry.tool`: `claude.ts:365` (`buildSettingsLocalJson`,
@@ -53,7 +53,7 @@ Established by grep, and by running all 30 pairs against real fixtures before wr
 - `src/converters/claude.ts:494` — the `exactItems("formatter", …)` call becomes a per-formatter
   classification using the existing `inferGlobFromCommand` at `:186`.
 - `tests/convert.test.ts:148-154` — the no-op round-trip block is removed.
-- All six converters are exercised by the new matrix test but none other is modified.
+- All five converters are exercised by the new matrix test but none other is modified.
 
 **Do-not-touch boundaries:**
 

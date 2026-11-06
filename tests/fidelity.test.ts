@@ -7,7 +7,6 @@ import { spawnSync } from "node:child_process";
 import { claudeConverter } from "../src/converters/claude.js";
 import { opencodeConverter } from "../src/converters/opencode.js";
 import { cursorConverter } from "../src/converters/cursor.js";
-import { windsurfConverter } from "../src/converters/windsurf.js";
 import { copilotConverter } from "../src/converters/copilot.js";
 import { codexConverter } from "../src/converters/codex.js";
 import type { Converter } from "../src/converters/types.js";
@@ -29,7 +28,6 @@ const TARGETS: Record<string, Converter> = {
   claude: claudeConverter,
   opencode: opencodeConverter,
   cursor: cursorConverter,
-  windsurf: windsurfConverter,
   copilot: copilotConverter,
   codex: codexConverter,
 };
@@ -154,7 +152,6 @@ describe("Requirement: A conversion never weakens a permission posture", () => {
     ["claude", "exact"],
     ["opencode", "exact"],
     ["cursor", "blocked"],
-    ["windsurf", "blocked"],
     ["copilot", "blocked"],
     ["codex", "blocked"],
   ])("A deny is refused for every target that cannot represent it: %s -> %s", (target, status) => {
@@ -196,7 +193,7 @@ describe("Requirement: OpenCode shorthand-only tools do not silently widen a den
 describe("Requirement: Conversion fidelity is reported per item", () => {
   it("A feature the target cannot represent is reported per item", () => {
     const config = claudeConverter.import(SAMPLE);
-    const { result } = exportToDisk(windsurfConverter, config);
+    const { result } = exportToDisk(codexConverter, config);
     const agentItems = result.items.filter((i) => i.kind === "agent");
     expect(agentItems.length).toBe(2);
     expect(agentItems.map((i) => i.name).sort()).toEqual(["backend", "reviewer"]);
@@ -232,17 +229,6 @@ describe("Requirement: Conversion fidelity is reported per item", () => {
 });
 
 describe("Requirement: A reported outcome matches what was written", () => {
-  it("Agents reported as carried over are present in an emitted file", () => {
-    const config = claudeConverter.import(SAMPLE);
-    const { result, joined } = exportToDisk(windsurfConverter, config);
-    const agentItems = result.items.filter((i) => i.kind === "agent");
-
-    const allDropped = agentItems.every((i) => i.status === "dropped");
-    const bodiesPresent =
-      joined.includes("backend development specialist") && joined.includes("You are a code reviewer");
-    expect(allDropped || bodiesPresent).toBe(true);
-  });
-
   it("Codex agent reporting matches its emitted output", () => {
     const config = claudeConverter.import(SAMPLE);
     const { result, joined } = exportToDisk(codexConverter, config);
@@ -257,7 +243,7 @@ describe("Requirement: A reported outcome matches what was written", () => {
   // The audit's H2: both exporters claimed agents were "merged" while writing nothing.
   it("No reason claims a merge that did not happen", () => {
     const config = claudeConverter.import(SAMPLE);
-    for (const converter of [windsurfConverter, codexConverter]) {
+    for (const converter of [codexConverter]) {
       const { result, joined } = exportToDisk(converter, config);
       const bodiesPresent = joined.includes("backend development specialist");
       for (const item of result.items) {
@@ -272,7 +258,7 @@ describe("Requirement: A reported outcome matches what was written", () => {
 describe("Requirement: Exit codes distinguish refusal from ordinary loss", () => {
   it("A conversion that only drops unsupported concepts has nothing blocked", () => {
     const config = claudeConverter.import(SAMPLE);
-    const { result } = exportToDisk(windsurfConverter, config);
+    const { result } = exportToDisk(codexConverter, config);
     expect(result.items.filter((i) => i.status === "blocked")).toHaveLength(0);
     expect(result.items.some((i) => i.status === "dropped")).toBe(true);
   });
@@ -314,7 +300,7 @@ describe("Requirement: The item list is available as JSON", () => {
 
   it.runIf(hasBuild)("A lossy conversion exits 0", () => {
     const r = run([
-      "convert", "--from", "claude", "--to", "windsurf",
+      "convert", "--from", "claude", "--to", "codex",
       "--source", SAMPLE, "--target", tmpDir(), "--dry-run",
     ]);
     expect(r.status).toBe(0);
@@ -331,5 +317,52 @@ describe("Requirement: The item list is available as JSON", () => {
   it.runIf(hasBuild)("Version matches package.json", () => {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(HERE, "..", "package.json"), "utf-8"));
     expect(run(["--version"]).stdout.trim()).toBe(pkg.version);
+  });
+});
+
+describe("Requirement: The supported targets are five harnesses", () => {
+  const CLI = path.resolve(HERE, "..", "dist", "index.js");
+  const hasBuild = fs.existsSync(CLI);
+  const FIVE = ["claude", "opencode", "cursor", "copilot", "codex"];
+
+  function run(args: string[]) {
+    const r = spawnSync("node", [CLI, ...args], { encoding: "utf-8" });
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+  }
+
+  it.runIf(hasBuild)("Windsurf is not a target", () => {
+    const out = path.join(tmpDir(), "out");
+    const r = run(["convert", "--from", "claude", "--to", "windsurf", "--source", SAMPLE, "--target", out]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("windsurf");
+    expect(r.stderr).toContain(FIVE.join(", "));
+    expect(fs.existsSync(out)).toBe(false);
+  });
+
+  it.runIf(hasBuild)("Windsurf is not a source", () => {
+    const src = tmpDir();
+    fs.mkdirSync(path.join(src, ".windsurf", "rules"), { recursive: true });
+    fs.writeFileSync(path.join(src, ".windsurf", "rules", "a.md"), "a");
+    const r = run(["convert", "--from", "windsurf", "--to", "claude", "--source", src, "--target", path.join(tmpDir(), "out")]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("windsurf");
+  });
+
+  it.runIf(hasBuild)("list omits Windsurf", () => {
+    const r = run(["list"]);
+    for (const name of ["Claude Code", "OpenCode", "Cursor", "Copilot", "Codex CLI"]) {
+      expect(r.stdout).toContain(name);
+    }
+    expect(r.stdout.toLowerCase()).not.toContain("windsurf");
+  });
+
+  it.runIf(hasBuild)("Existing user Windsurf files are left alone", () => {
+    const target = tmpDir();
+    const keep = path.join(target, ".windsurf", "rules", "keep.md");
+    fs.mkdirSync(path.dirname(keep), { recursive: true });
+    fs.writeFileSync(keep, "keep");
+    const r = run(["convert", "--from", "claude", "--to", "cursor", "--source", SAMPLE, "--target", target]);
+    expect(r.status).toBe(0);
+    expect(fs.readFileSync(keep, "utf-8")).toBe("keep");
   });
 });

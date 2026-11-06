@@ -38,5 +38,5 @@
 - [x] 4.3 End-to-end: a repository whose only Claude config is a root `CLAUDE.md` is detected and
       converts successfully, where it previously exited 1.
 - [x] 4.4 Run `npm run check`. Diff emitted output against the `safe-writes` build for a
-      glob-free config across all six targets; assert byte-identical.
+      glob-free config across all five targets; assert byte-identical.
 - [x] 4.5 Update `CHANGELOG.md` under `[Unreleased]` and `README.md`'s file-location table.

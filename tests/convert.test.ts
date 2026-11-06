@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { claudeConverter } from "../src/converters/claude.js";
 import { opencodeConverter } from "../src/converters/opencode.js";
 import { cursorConverter } from "../src/converters/cursor.js";
-import { windsurfConverter } from "../src/converters/windsurf.js";
 import { copilotConverter } from "../src/converters/copilot.js";
 import { codexConverter } from "../src/converters/codex.js";
 
@@ -104,15 +103,6 @@ describe("cursor exporter", () => {
   });
 });
 
-describe("windsurf exporter", () => {
-  it("dry-run produces rules and skills", () => {
-    const config = claudeConverter.import(FIXTURE);
-    const result = windsurfConverter.export("/tmp/test-windsurf", config, { dryRun: true });
-    expect(result.filesWritten.some((f) => f.includes(".windsurf/rules/"))).toBe(true);
-    expect(result.filesWritten.some((f) => f.includes("SKILL.md"))).toBe(true);
-  });
-});
-
 describe("copilot exporter", () => {
   it("dry-run produces copilot-instructions.md", () => {
     const config = claudeConverter.import(FIXTURE);
@@ -150,4 +140,4 @@ describe("codex exporter", () => {
 
 // The block that stood here was named "round-trip: claude -> opencode -> claude" but performed
 // no export and no re-import — it asserted on the original config, so it could not fail for any
-// conversion defect. Real round trips over all 30 ordered pairs live in tests/matrix.test.ts.
+// conversion defect. Real round trips over all 20 ordered pairs live in tests/matrix.test.ts.

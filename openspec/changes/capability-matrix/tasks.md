@@ -12,11 +12,10 @@
 - [x] 2.2 `src/converters/types.ts`: add `Capability = "full" | "user-level" | "none"` and a
       required `capabilities: Record<Feature, Capability>` on `Converter`. Document that this is
       documentation of what converts, and that permission enforcement stays in `permissionStatus`.
-- [x] 2.3 Regression: `npm run typecheck` fails until all six converters declare, confirming the
+- [x] 2.3 Regression: `npm run typecheck` fails until all five converters declare, confirming the
       record is total by construction rather than by convention.
 - [x] 2.4 Declare `capabilities` on each converter, one per unit, reading its own `import`/`export`
-      to fix the value: `claude.ts`, `opencode.ts`, `cursor.ts`, `windsurf.ts`, `copilot.ts`,
-      `codex.ts`.
+      to fix the value: `claude.ts`, `opencode.ts`, `cursor.ts`, `copilot.ts`, `codex.ts`.
 
 ## 3. The behaviour the declaration describes
 
@@ -25,11 +24,11 @@
 - [x] 3.2 Regression test for 3.1's caller path: export a config holding a hook and a formatter to
       a real temp directory, read `opencode.json` back, and assert the `formatter` key is present
       and unchanged while the hook item is `dropped`. Assert the run still exits `0`.
-- [x] 3.3 Consistency test over all 6 converters × 8 features: export a config holding one of every
+- [x] 3.3 Consistency test over all 5 converters × 8 features: export a config holding one of every
       feature to a real temp directory; assert `full` yields at least one `exact`/`lossy` item of
       that kind, and `user-level`/`none` yields no `exact` or `lossy` item.
 - [x] 3.4 Test that a `user-level` declaration's drop reason names the out-of-repo path
-      (`~/.codeium/windsurf/mcp_config.json`, `~/.codex/config.toml`).
+      (`~/.codex/config.toml`).
 
 ## 4. Rendering
 
@@ -48,13 +47,13 @@
 
 ## 5. Verification
 
-- [x] 5.1 Regression across all six converters. **Deviation from the written task:** no pre-change
+- [x] 5.1 Regression across all five converters. **Deviation from the written task:** no pre-change
       binary exists to diff against — phases 0-3 are uncommitted, so a rebuilt baseline would be
       the 0.1.2 release, whose output differs from this branch for reasons already landed. The
       claim is established instead by (a) `grep -rn "capabilities\|\.label" src/`, which finds
       exactly two reads, both in `src/matrix.ts:69,75`, neither reachable from any `export()`;
       (b) the 108 pre-existing tests, including `safe-writes`' emitted-content assertions,
-      unchanged and green; (c) the six target trees emitted from the built CLI over
+      unchanged and green; (c) the five target trees emitted from the built CLI over
       `sample-project` and hashed. The only semantic edit is a `FidelityItem.status` string, which
       is reported, never written to a file.
 - [x] 5.2 Run `npm run check` (typecheck + lint + test + docs:check).

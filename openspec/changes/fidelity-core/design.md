@@ -1,7 +1,7 @@
 ## Context
 
 harnessport imports a source harness's config into `HarnessConfig` (`src/schema.ts`) and exports it
-to a target's layout. Six converters implement `Converter` (`src/converters/types.ts`). The package
+to a target's layout. Five converters implement `Converter` (`src/converters/types.ts`). The package
 is published (`harnessport@0.1.2`) and its product is files written into a user's repository.
 
 Two defects drive this change. `PermissionEntry` is `{ tool, pattern }` with no action, so
@@ -17,9 +17,9 @@ Constraints this change lives under:
 - **`serializeFrontmatter` is frozen.** Settled in Phase 0 when `gray-matter` was replaced.
 - **`tests/fixtures/sample-project/` is frozen.** Every existing test asserts against its counts;
   new fixtures go alongside it.
-- **Four of six targets have no permission model.** cursor, windsurf, copilot, and codex have zero
+- **Three of five targets have no permission model.** cursor, copilot, and codex have zero
   references to `config.permissions` in their export paths. Any design that makes an unrepresentable
-  permission fail the whole run makes those four targets unreachable.
+  permission fail the whole run makes those three targets unreachable.
 
 ## Goals / Non-Goals
 
@@ -42,11 +42,11 @@ Constraints this change lives under:
 
 **Blocking is per item, not per run.** A blocked permission suppresses only that permission; every
 other feature still converts and its files are still written. Alternative considered: abort the
-whole conversion. Rejected because cursor, windsurf, copilot, and codex can never represent a deny,
-so aborting would make those four targets permanently unreachable for any user holding one deny rule.
+whole conversion. Rejected because cursor, copilot, and codex can never represent a deny,
+so aborting would make those three targets permanently unreachable for any user holding one deny rule.
 
 **Exit 2 on blocked only, never on lossy.** Measured on the existing fixture: converting to cursor
-already emits 2 warnings and to windsurf 4. Lossy is the normal case for this tool, so an exit code
+already emits 2 warnings. Lossy is the normal case for this tool, so an exit code
 that fired on it would be noise. Blocked is exceptional and therefore carries signal.
 
 **No downgrade flag.** There is no option that emits a deny as an allow. The blocked item names the
@@ -60,10 +60,10 @@ Human stdout and `--json` both render from items, so they cannot disagree.
 
 **`generateDropWarnings` becomes `generateDropItems`** returning `FidelityItem[]`. It already has the
 per-feature shape; this is a return-type change, not a rewrite. Renaming rather than overloading
-keeps the four call sites honest about what they now produce.
+keeps the three call sites honest about what they now produce.
 
 **Per-target permission capability is declared, not inferred.** Each converter states which actions
-it can represent, so the blocked decision is a lookup rather than logic duplicated six times. This is
+it can represent, so the blocked decision is a lookup rather than logic duplicated five times. This is
 the seed of the Phase 4 capability matrix, but scoped here to permissions only — a full capability
 declaration is Phase 4's job and is not built speculatively.
 
@@ -82,13 +82,13 @@ Per converter, whether emitted output changes:
   [Risk: `buildPermissionConfig` currently hardcodes `action: "allow"` at `opencode.ts:394`, so every
   entry silently widens] → Mitigation: that literal is the defect; it is replaced by the entry's own
   action, and a scenario asserts a shorthand deny is refused rather than widened.
-- **cursor, windsurf, copilot, codex** — *no change to emitted files.* None reference
+- **cursor, copilot, codex** — *no change to emitted files.* None reference
   `config.permissions` in export. They gain blocked items and a possible exit 2, but write exactly
   what they wrote before. [Risk: a user converting to these targets now sees exit 2 where they saw 0]
   → Mitigation: this is the intended signal, and files are still written; documented in the changelog
   as breaking.
 
-[Risk: `HarnessConfig.warnings` → `items` touches all six importers] → Mitigation: five of six set it
+[Risk: `HarnessConfig.warnings` → `items` touches all five importers] → Mitigation: four of five set it
 to `[]` today; only `codex.ts:94` populates it. Land the schema change first, then converters one at
 a time, per the task order.
 

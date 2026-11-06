@@ -32,7 +32,7 @@ Constraints:
 
 - Rule scoping and `.claude/rules/` (Phase 3).
 - The capability matrix as data (Phase 4).
-- Merging agent bodies into rules for Windsurf and Codex. See Decisions.
+- Merging agent bodies into rules for Codex. See Decisions.
 - A `--backup-dir` or configurable backup naming. `<path>.bak` until someone asks.
 
 ## Decisions
@@ -57,14 +57,13 @@ unreachable. The run still exits 2.
 makes it recoverable, not un-lost. Naming the backup path in the item is what makes recovery
 actionable.
 
-**Agent bodies are NOT merged into Windsurf or Codex rules.** The Phase 2 plan proposed appending
+**Agent bodies are NOT merged into Codex rules.** The Phase 2 plan proposed appending
 them so the old "merged into rules" warning would become true. On reading the semantics this is the
 wrong fix: an agent body is instructions for a specific delegated task, while
-`.windsurf/rules/*.md` and `AGENTS.md` are always-on context. Merging five agents' prompts into one
+`AGENTS.md` is always-on context. Merging five agents' prompts into one
 always-on file produces contradictory global instructions — worse than dropping, and it would be
 done silently. `fidelity-core` already made the report honest by marking them `dropped`. If content
-preservation is wanted later, the right target is `.windsurf/rules/<agent>.md` with
-`trigger: model_decision` and the agent's description, which preserves the "invoke when relevant"
+preservation is wanted later, it needs a per-agent target that keeps the "invoke when relevant"
 semantics. Deferred rather than guessed at.
 
 **zod is removed.** It has been types-only since the beginning — no `.parse` or `.safeParse`
@@ -78,7 +77,7 @@ accepts. `schema.ts` becomes plain TypeScript types and the runtime dependency g
 
 Per converter, whether emitted output changes:
 
-- **All six** — *no change to emitted content, paths, or layout.* The change gates whether a write
+- **All five** — *no change to emitted content, paths, or layout.* The change gates whether a write
   occurs. [Risk: a mechanical error while touching 22 call sites silently stops a file being
   written] → Mitigation: the existing suite asserts on `filesWritten` per converter, and the
   end-to-end test reads emitted files back from disk. A dropped write fails those.
@@ -101,7 +100,7 @@ consumer importing `HarnessConfigSchema` itself breaks, and that is not a docume
 ## Migration Plan
 
 **Deployment order.** `WriteContext` and `writeIfNotDry` in `src/utils.ts` first, then
-`Converter.export`'s options object in `src/converters/types.ts`, then the six converters one at a
+`Converter.export`'s options object in `src/converters/types.ts`, then the five converters one at a
 time, then `src/index.ts`. Interfaces before callers.
 
 **Backward compatibility.** No input becomes invalid and no output shape changes. A user converting

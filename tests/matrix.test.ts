@@ -23,14 +23,13 @@ const FIXTURE_DIRS: Record<string, string> = {
   claude: "sample-project",
   opencode: "opencode-project",
   cursor: "cursor-project",
-  windsurf: "windsurf-project",
   copilot: "copilot-project",
   codex: "codex-project",
 };
 
 const NAMES = ALL_CONVERTERS.map((c) => c.name);
 
-/** Every ordered pair of distinct harnesses — the 30 real conversion paths. */
+/** Every ordered pair of distinct harnesses — the 20 real conversion paths. */
 const PAIRS: Array<[string, string]> = NAMES.flatMap((from) =>
   NAMES.filter((to) => to !== from).map((to): [string, string] => [from, to]),
 );
@@ -70,8 +69,8 @@ describe("Requirement: Each importer reads its own fixture", () => {
 });
 
 describe("Requirement: Every ordered pair of harnesses converts end to end", () => {
-  it("covers all thirty ordered pairs", () => {
-    expect(PAIRS).toHaveLength(30);
+  it("covers all twenty ordered pairs", () => {
+    expect(PAIRS).toHaveLength(20);
   });
 
   it.each(PAIRS)("%s -> %s is detected by its target", (from, to) => {

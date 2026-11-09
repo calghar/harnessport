@@ -273,11 +273,12 @@ Then(
 // --- Thens: wrapper runs ---
 
 Then(
-  /^`seen\.json` holds `tool_name` equal to `(\w+)`(?: and `tool_input\.command` equal to `(\w+)`)?$/,
-  function (this: CursorWorld, tool: string, command?: string) {
-    const seen = JSON.parse(readText(this.outDir, "seen.json")) as { tool_name: string; tool_input: { command?: string } };
+  /^`seen\.json` holds `tool_name` equal to `(\w+)`(?: and `tool_input\.(command|prompt)` equal to `([^`]+)`)?$/,
+  function (this: CursorWorld, tool: string, field?: string, value?: string) {
+    const seen = JSON.parse(readText(this.outDir, "seen.json")) as { tool_name: string; tool_input: Record<string, string> };
     assert.equal(seen.tool_name, tool);
-    if (command) assert.equal(seen.tool_input.command, command);
+    // Cucumber passes null for an unmatched optional group.
+    if (field != null && value != null) assert.equal(seen.tool_input[field], value);
   },
 );
 

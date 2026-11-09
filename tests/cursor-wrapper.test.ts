@@ -335,13 +335,17 @@ describe("Cursor hook export", () => {
     const sha = (dir: string, rel: string) => createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex");
     const dir = tmpDir();
     const { items } = cursorConverter.export(dir, configWith(guard({ command: "./guard.sh" })), {});
-    expect(sha(dir, WRAPPER)).toBe("9691912178061c618a7432a6c20fb2e0afd43556493bfea90ec27900179b9132");
+    expect(sha(dir, WRAPPER)).toBe("98ca6189dd465bb2a13b6b53ce6e955f410815d7b9c5deb47e2de1b4cff2d748");
     expect(sha(dir, ".cursor/hooks.json")).toBe("e7a3f206398f492486d2ea88123a226600aac2fe3ad231c6a3fa23f78219af67");
     expect(items.find((i) => i.kind === "hook")?.status).toBe("exact");
 
     const bare = tmpDir();
     const bareItems = cursorConverter.export(bare, configWith(guard({ matcher: undefined, command: "./guard.sh" })), {}).items;
-    expect(read(bare, WRAPPER)).toBe(read(dir, WRAPPER));
+    const [bareMetadata, ...bareWrapper] = read(bare, WRAPPER).split("\n");
+    const [bashMetadata, ...bashWrapper] = read(dir, WRAPPER).split("\n");
+    expect(bareMetadata).toBe('const HOOK = {"command":"./guard.sh","sourceEvent":"PreToolUse"};');
+    expect(bashMetadata).toContain('"matcher":"Bash"');
+    expect(bareWrapper).toEqual(bashWrapper);
     expect(JSON.parse(read(bare, ".cursor/hooks.json")).hooks.preToolUse[0].matcher).toBe("*");
     expect(bareItems.find((i) => i.kind === "hook")?.status).toBe("lossy");
   });
@@ -395,7 +399,7 @@ describe("Cursor hook export", () => {
       const entry = JSON.parse(read(dir, ".cursor/hooks.json")).hooks[cursor];
       expect(entry).toEqual([{ command: "node .cursor/hooks/harnessport-guard-1.mjs", ...(matcher && { matcher }) }]);
       const item = items.find((i) => i.name === event);
-      expect(item?.status).toBe(event === "SessionEnd" || event === "SubagentStart" ? "exact" : "lossy");
+      expect(item?.status).toBe(event === "SessionEnd" ? "exact" : "lossy");
       expect(item?.reason).toContain("Third-Party Imports");
     });
 

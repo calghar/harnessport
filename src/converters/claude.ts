@@ -566,8 +566,24 @@ export const claudeConverter: Converter = {
 
     items.push(
       ...exactItems("skill", config.skills.map((s) => s.name)),
-      ...exactItems("command", config.commands.map((c) => c.name)),
-      ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
+      ...config.commands.map((command): FidelityItem => ({
+        phase: "export",
+        kind: "command",
+        name: command.name,
+        status: command.agent === undefined ? "exact" : "lossy",
+        ...(command.agent !== undefined && {
+          reason: "Claude command files cannot select an agent",
+        }),
+      })),
+      ...config.mcpServers.map((server): FidelityItem => ({
+        phase: "export",
+        kind: "mcp",
+        name: server.name,
+        status: server.enabled === undefined ? "exact" : "lossy",
+        ...(server.enabled !== undefined && {
+          reason: "Claude .mcp.json cannot hold enabled state",
+        }),
+      })),
       ...exactItems("hook", config.hooks.filter(acceptsClaudeDialect).map((h) => h.event)),
       ...config.hooks
         .filter((h) => !acceptsClaudeDialect(h))

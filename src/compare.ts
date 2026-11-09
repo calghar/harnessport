@@ -76,6 +76,59 @@ function ruleTextLost(
     .map((r) => ({ kind: "rule" as const, name: r.source ?? "project-rules" }));
 }
 
+function sourceFieldsSurvive(source: unknown, target: unknown): boolean {
+  if (source === undefined) return true;
+  if (Array.isArray(source)) {
+    return Array.isArray(target) &&
+      source.length === target.length &&
+      source.every((value, index) => sourceFieldsSurvive(value, target[index]));
+  }
+  if (typeof source === "object" && source !== null) {
+    if (typeof target !== "object" || target === null) return false;
+    const targetRecord = target as Record<string, unknown>;
+    return Object.entries(source).every(
+      ([key, value]) => value === undefined || sourceFieldsSurvive(value, targetRecord[key]),
+    );
+  }
+  return Object.is(source, target);
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return sourceFieldsSurvive(left, right);
+}
+
+function changedFields(source: HarnessConfig, target: HarnessConfig): Lost[] {
+  const compare = <T>(
+    kind: Feature,
+    sourceValues: T[],
+    targetValues: T[],
+    name: (value: T) => string,
+  ): Lost[] => sourceValues.flatMap((sourceValue) => {
+    const key = name(sourceValue);
+    const candidates = targetValues.filter(
+      (targetValue) => name(targetValue).toLowerCase() === key.toLowerCase(),
+    );
+    return candidates.length > 0 && !candidates.some((candidate) => sameValue(sourceValue, candidate))
+      ? [{ kind, name: key }]
+      : [];
+  });
+
+  return [
+    ...compare("agent", source.agents, target.agents, (agent) => agent.name),
+    ...compare("skill", source.skills, target.skills, (skill) => skill.name),
+    ...compare("command", source.commands, target.commands, (command) => command.name),
+    ...compare("mcp", source.mcpServers, target.mcpServers, (server) => server.name),
+    ...compare(
+      "permission",
+      source.permissions,
+      target.permissions,
+      (permission) => `${permission.tool}(${permission.pattern})`,
+    ),
+    ...compare("hook", source.hooks, target.hooks, (hook) => hook.event),
+    ...compare("formatter", source.formatters, target.formatters, (formatter) => formatter.glob),
+  ];
+}
+
 /**
  * Split what a round trip lost into the part its fidelity report admitted and the part it did not.
  *
@@ -93,12 +146,20 @@ export function roundTripLoss(
 
   const lost: Lost[] = [
     ...ruleTextLost(source, target),
+    ...changedFields(source, target),
     ...Object.entries(before).flatMap(([kind, names]) =>
       names
         .filter((name) => !includesName(after[kind as Feature], name))
         .map((name) => ({ kind: kind as Feature, name })),
     ),
-  ];
+  ].filter(
+    (entry, index, all) =>
+      all.findIndex(
+        (candidate) =>
+          candidate.kind === entry.kind &&
+          candidate.name.toLowerCase() === entry.name.toLowerCase(),
+      ) === index,
+  );
 
   const accounted: Lost[] = [];
   const unaccounted: Lost[] = [];

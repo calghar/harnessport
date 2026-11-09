@@ -7,17 +7,19 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - run: npm ci
 
@@ -25,12 +27,10 @@ jobs:
 
       - run: npm run check
 
-      # No continue-on-error. A failed publish used to leave this workflow green, so v0.2.0
-      # reported success while npm kept serving 0.1.2 — the token had expired and nothing said so.
+      # No continue-on-error. A failed publish used to leave this workflow green while npm kept
+      # serving the previous version.
       - name: Publish to npm
         run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
       # Trust the registry, not the exit code.
       - name: Verify the registry serves this tag

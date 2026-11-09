@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -31,21 +31,28 @@ jobs:
       - name: Publish to npm
         run: npm publish
 
-      # Trust the registry, not the exit code.
-      - name: Verify the registry serves this tag
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Verify npm serves the published version
         run: |
           set -euo pipefail
           expected="${GITHUB_REF_NAME#v}"
-          for attempt in $(seq 1 10); do
-            published=$(npm view harnessport version 2>/dev/null || echo "")
-            [ "$published" = "$expected" ] && echo "npm serves $published" && exit 0
-            echo "attempt $attempt: npm serves '${published:-nothing}', want $expected"
-            sleep 6
+          for attempt in $(seq 1 30); do
+            published=$(npm view "harnessport@$expected" version --prefer-online 2>/dev/null || echo "")
+            [ "$published" = "$expected" ] && echo "npm serves harnessport@$published" && exit 0
+            echo "attempt $attempt: harnessport@$expected is not visible"
+            sleep 10
           done
-          echo "::error::npm never served $expected"
+          echo "::error::npm never served harnessport@$expected"
           exit 1
 
-      # Last, so a release is never announced for a version nobody can install.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

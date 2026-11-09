@@ -24,10 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Exported hooks to Cursor as `.cursor/hooks.json` through Node wrappers
 - Exported shell-free formatters to Cursor as an `afterFileEdit` hook, imported them back, and exported Claude `Bash` deny rules to `.cursor/cli.json`
+- Imported generated Cursor hook wrappers back into canonical Claude hooks
+- Mapped Cursor `Shell`, `Read`, `Write`, `WebFetch`, and `Mcp` permission tokens at project and user level
+- Enforced Claude MCP `ask` permissions through Cursor `beforeMCPExecution` wrappers
 
 ### Changed
 
 - Mapped a Claude `Agent` guardrail to Cursor `preToolUse` matcher `Subagent`, and renamed that tool to `Agent` so `tool_input.prompt` reaches the hook
+- Compared canonical fields and permission actions during round-trip verification, not only item names
 - Wrapped Cursor `Read` guardrails on `beforeReadFile`, with the read range recovered from the content line count
 - Limited Cursor `Read` guardrails to reads that passed `preToolUse` first, so Cursor's own whole-file reads for edits are allowed
 - Wrapped Cursor `Write`, `Edit` and `MultiEdit` guardrails on `preToolUse` instead of writing nothing
@@ -43,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed an import stopping on one file with invalid YAML frontmatter; the file is reported as `blocked` and the rest of the import continues
+- Fixed Cursor hook-only and permission-only configuration detection
+- Removed stale generated Cursor wrappers during forced conversion without removing foreign hooks
+- Stopped counting safety backup files as conversion loss
+- Reported unsupported Cursor agent, command, MCP enabled-state, and subagent-event fields as lossy
 - Fixed the Cursor wrapper command for a home-directory target to use a quoted absolute path, so global hooks run from any project
 - OpenCode `WebSearch` permissions were dropped or blocked; they are now written as the `websearch` key
 - Copilot reasons said `preToolUse` hooks cannot block and the CLI has no permission-request event; both reasons are corrected

@@ -326,16 +326,7 @@ export function writeIfNotDry(
   }
 
   if (existing !== undefined) {
-    // force: the original is destroyed unless it is preserved first.
-    const backup = `${filePath}.bak`;
-    if (!ctx.dryRun) fs.copyFileSync(filePath, backup);
-    ctx.items.push({
-      phase: "export",
-      kind: "rule",
-      name: backup,
-      status: "lossy",
-      reason: `overwrote an existing file; the previous content was saved to ${backup}`,
-    });
+    if (!ctx.dryRun) fs.copyFileSync(filePath, `${filePath}.bak`);
   }
 
   if (!ctx.dryRun) {

@@ -641,7 +641,7 @@ export const opencodeConverter: Converter = {
     }
 
     for (const agent of config.agents) {
-      const remapped = agent.skills && agent.skills.length > 0;
+      const remapped = Boolean(agent.skills?.length || agent.tools?.length);
       items.push({
         phase: "export",
         kind: "agent",
@@ -649,7 +649,7 @@ export const opencodeConverter: Converter = {
         status: remapped ? "lossy" : "exact",
         ...(remapped && {
           reason:
-            'agent "skills" were remapped onto OpenCode permission.skill patterns (deny-by-default, listed skills allowed)',
+            "agent skills and tools were remapped onto OpenCode permission fields",
         }),
       });
     }

@@ -16,7 +16,7 @@ against what that converter actually reports converting. Run `npm run docs:matri
 | Skills      | yes         | yes      | yes    | yes     | yes        |
 | Commands    | yes         | yes      | yes    | yes     | -          |
 | MCP Servers | yes         | yes      | yes    | yes     | user-level |
-| Permissions | yes         | yes      | -      | -       | -          |
+| Permissions | yes         | yes      | yes    | -       | -          |
 | Hooks       | yes         | -        | yes    | yes     | yes        |
 | Formatters  | yes         | yes      | yes    | -       | -          |
 
@@ -110,15 +110,20 @@ Every converted item is classified, so you can see exactly what survived:
 ```
 Fidelity: 1 exact, 0 lossy, 1 dropped, 2 blocked
 
-  BLOCKED
-    permission bash(rm -rf *)
-      Cursor cannot express a "deny" permission; refusing to emit it as an allow
+  DROPPED
+    permission WebSearch(*)
+      Cursor has no documented permission token for this Claude tool or pattern
 ```
 
 **Permissions are never weakened.** A `deny` or `ask` rule is never emitted as an `allow`. Where
 the target harness has no way to express it, the entry is refused and reported rather than
 downgraded — there is no flag that overrides this. The rest of the conversion still completes, so
 you get your files plus an accurate account of what did not carry.
+
+Cursor conversions map documented `Shell`, `Read`, `Write`, `WebFetch`, and `Mcp` allow and deny
+tokens. Claude MCP `ask` entries use `beforeMCPExecution` wrappers. Other `ask` entries are blocked.
+At user level, harnessport replaces only the permission arrays in `~/.cursor/cli-config.json` and
+preserves the other Cursor CLI settings.
 
 **Hook fidelity.** A guardrail is a hook on `PreToolUse`, `PermissionRequest` or `UserPromptSubmit`.
 A target that cannot write or enforce a guardrail reports it `blocked`, and `convert` exits `2`.
@@ -153,9 +158,8 @@ harnessport verify ./my-project --from claude --to cursor
 Every loss was accounted for.
 ```
 
-Losing something is ordinary — converting Claude permissions to Cursor loses all of them, by
-design. `verify` exits `2` only when something disappears that the fidelity report called `exact`,
-which means the report is wrong. It is the same comparison the test suite runs over all 30
+Losing something is ordinary. `verify` exits `2` only when something disappears that the fidelity
+report called `exact`, which means the report is wrong. It is the same comparison the test suite runs over all 20
 conversion paths.
 
 ### Keep several harness configs in step

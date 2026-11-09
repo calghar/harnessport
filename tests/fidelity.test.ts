@@ -78,7 +78,7 @@ describe("Requirement: A deny is never emitted as allow", () => {
       const settings = JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.local.json"), "utf-8"));
       expect(settings.permissions[action]).toContain("Bash(ls *)");
     }
-    const expected = { claude: "exact", opencode: "exact", cursor: "lossy", copilot: "blocked", codex: "blocked" };
+    const expected = { claude: "exact", opencode: "exact", cursor: "exact", copilot: "blocked", codex: "blocked" };
     for (const [target, status] of Object.entries(expected)) {
       const { result, joined } = exportToDisk(TARGETS[target], configWith([permission("Bash", "rm -rf *", "deny")]));
       const permItems = result.items.filter((i) => i.kind === "permission");

@@ -302,6 +302,7 @@ function planHook(hook: Hook): { item: FidelityItem; key?: string; entry?: Recor
       const unknown = tokens.find((t) => !Object.hasOwn(POST_TOOL_USE_NAMES, t));
       if (unknown) return refuse(`has no runtime name for the matcher token "${unknown}"`);
       matcher = tokens.map((t) => POST_TOOL_USE_NAMES[t]).join("|");
+      lossy = "Claude matcher names were replaced with Copilot runtime tool names";
     }
   }
 
@@ -336,6 +337,36 @@ function exportHooks(
   const filePath = path.join(rootDir, ".github", "hooks", "hooks.json");
   const body = `${JSON.stringify({ version: 1, hooks: table }, null, 2)}\n`;
   return { files: writeIfNotDry(filePath, body, ctx) ? [filePath] : [], items };
+}
+
+function agentItems(agents: Agent[]): FidelityItem[] {
+  return agents.map((agent) => {
+    const lost = [
+      ...(agent.skills?.length ? ["skills"] : []),
+      ...(agent.mode !== undefined ? ["mode"] : []),
+      ...(agent.temperature !== undefined ? ["temperature"] : []),
+      ...(agent.permissions !== undefined ? ["permissions"] : []),
+    ];
+    return {
+      phase: "export",
+      kind: "agent",
+      name: agent.name,
+      status: lost.length ? "lossy" : "exact",
+      ...(lost.length && { reason: `Copilot agent files cannot hold: ${lost.join(", ")}` }),
+    };
+  });
+}
+
+function mcpItems(servers: HarnessConfig["mcpServers"]): FidelityItem[] {
+  return servers.map((server) => ({
+    phase: "export",
+    kind: "mcp",
+    name: server.name,
+    status: server.enabled === undefined ? "exact" : "lossy",
+    ...(server.enabled !== undefined && {
+      reason: "Copilot mcp.json cannot hold enabled state",
+    }),
+  }));
 }
 
 export const copilotConverter: Converter = {
@@ -407,10 +438,10 @@ export const copilotConverter: Converter = {
 
     items.push(
       ...exactItems("rule", config.rules.map((r) => r.source ?? "project-rules")),
-      ...exactItems("agent", config.agents.map((a) => a.name)),
+      ...agentItems(config.agents),
       ...exactItems("skill", config.skills.map((s) => s.name)),
       ...exactItems("command", config.commands.map((c) => c.name)),
-      ...exactItems("mcp", config.mcpServers.map((s) => s.name)),
+      ...mcpItems(config.mcpServers),
       ...hooksOut.items,
       ...config.permissions.map((p) =>
         permissionStatus(p, copilotConverter.permissionActions, "Copilot", REASON_PERMISSIONS),

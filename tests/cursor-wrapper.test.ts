@@ -73,6 +73,11 @@ describe("Cursor wrapper", () => {
     expect(seen(runWith(stdinStub).dir)).toEqual({ tool_name: "Bash", tool_input: { command: "ls" } });
     const payload = { tool_name: "Write", tool_input: { file_path: "/x" } };
     expect(seen(runWith(stdinStub, JSON.stringify(payload)).dir)).toEqual(payload);
+    const brief = { tool_name: "Subagent", tool_input: { prompt: "brief", subagent_type: "generalPurpose" } };
+    expect(seen(runWith(stdinStub, JSON.stringify(brief)).dir)).toEqual({
+      tool_name: "Agent",
+      tool_input: brief.tool_input,
+    });
   });
 });
 
@@ -285,6 +290,7 @@ describe("Cursor hook export", () => {
   it("maps supported matchers and blocks unsupported ones without writing", () => {
     const mapped: Array<[string | undefined, string, string]> = [
       ["Bash|Edit", "Shell|Write", "lossy"],
+      ["Agent", "Subagent", "exact"],
       ["*", "*", "lossy"],
     ];
     for (const [matcher, expected, status] of mapped) {
@@ -329,7 +335,7 @@ describe("Cursor hook export", () => {
     const sha = (dir: string, rel: string) => createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex");
     const dir = tmpDir();
     const { items } = cursorConverter.export(dir, configWith(guard({ command: "./guard.sh" })), {});
-    expect(sha(dir, WRAPPER)).toBe("86b4c7c7c085e21cc691dc7c60f129864f4d6a07ee0b1f6f66c1d8f3432705ab");
+    expect(sha(dir, WRAPPER)).toBe("9691912178061c618a7432a6c20fb2e0afd43556493bfea90ec27900179b9132");
     expect(sha(dir, ".cursor/hooks.json")).toBe("e7a3f206398f492486d2ea88123a226600aac2fe3ad231c6a3fa23f78219af67");
     expect(items.find((i) => i.kind === "hook")?.status).toBe("exact");
 

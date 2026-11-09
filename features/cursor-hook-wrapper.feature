@@ -40,7 +40,7 @@ Feature: cursor-hook-wrapper
     And an item names `.cursor/hooks.json` with status `blocked`
 
   # Requirement: Cursor matchers and events are mapped or reported
-  # The Cursor exporter SHALL map each `|` token of a guardrail matcher as follows: `Bash` to `Shell`, `Read` to `beforeReadFile` (see `cursor-native-hooks`), `Write` to `Write`, `Grep` to `Grep`, `Edit` and `MultiEdit` to `Write`. Duplicate results are written once. A matcher of `*`, empty or absent maps to `*`. An `Edit` or `MultiEdit` token SHALL make the item `lossy`, with a reason stating that Cursor `Write` covers both creates and edits. A `*` matcher SHALL make the item `lossy`, with a reason stating that Cursor tool names other than `Shell` reach the script unrenamed. Any other token, and any matcher other than a lone `*` that contains a character outside letters, digits, `_` and `|`, SHALL make the item `blocked`, with a reason naming the token. If any matcher token is unmapped, the item is `blocked` and no `lossy` reason is added. An empty or absent matcher is `lossy` under the `*` reason. A `PermissionRequest` or `UserPromptSubmit` guardrail SHALL be reported `blocked`. A non-guardrail hook SHALL be reported `dropped`, with the reason: "Cursor runs this hook only if `.claude/settings.json` holds it and Third-Party Imports is on."
+  # The Cursor exporter SHALL map each `|` token of a guardrail matcher as follows: `Bash` to `Shell`, `Agent` to `Subagent`, `Read` to `beforeReadFile` (see `cursor-native-hooks`), `Write` to `Write`, `Grep` to `Grep`, `Edit` and `MultiEdit` to `Write`. Duplicate results are written once. A matcher of `*`, empty or absent maps to `*`. An `Edit` or `MultiEdit` token SHALL make the item `lossy`, with a reason stating that Cursor `Write` covers both creates and edits. A `*` matcher SHALL make the item `lossy`, with a reason stating that Cursor tool names other than `Shell` and `Subagent` reach the script unrenamed. Any other token, and any matcher other than a lone `*` that contains a character outside letters, digits, `_` and `|`, SHALL make the item `blocked`, with a reason naming the token. If any matcher token is unmapped, the item is `blocked` and no `lossy` reason is added. An empty or absent matcher is `lossy` under the `*` reason. A `PermissionRequest` or `UserPromptSubmit` guardrail SHALL be reported `blocked`. A non-guardrail hook SHALL be reported `dropped`, with the reason: "Cursor runs this hook only if `.claude/settings.json` holds it and Third-Party Imports is on."
 
   @requirement_cursor_matchers_and_events_are_mapped_or_reported
   Scenario: A Bash|Edit matcher becomes Shell|Write and is lossy
@@ -83,13 +83,26 @@ Feature: cursor-hook-wrapper
     Then the item of kind `hook` named `PostToolUse` has status `dropped` and its reason names `dialect`
 
   # Requirement: The wrapper renames `Shell` to `Bash`
-  # The wrapper SHALL read Cursor's stdin JSON, replace `tool_name` `Shell` with `Bash`, and leave every other field unchanged. It SHALL run the original command with that JSON on stdin, from the wrapper's working directory, with the inherited environment. A hook with `args` runs as `command` plus `args` without a shell. A hook without `args` runs `command` through the platform shell.
+  # The wrapper SHALL read Cursor's stdin JSON, replace `tool_name` `Shell` with `Bash` and `Subagent` with `Agent`, and leave every other field unchanged. It SHALL run the original command with that JSON on stdin, from the wrapper's working directory, with the inherited environment. A hook with `args` runs as `command` plus `args` without a shell. A hook without `args` runs `command` through the platform shell.
 
   @requirement_the_wrapper_renames_shell_to_bash
   Scenario: Shell is renamed to Bash
     Given a wrapper generated for a command that writes its stdin to `seen.json`
     When the wrapper is run with stdin `{"tool_name": "Shell", "tool_input": {"command": "ls"}}`
     Then `seen.json` holds `tool_name` equal to `Bash` and `tool_input.command` equal to `ls`
+
+  @requirement_the_wrapper_renames_shell_to_bash
+  Scenario: Subagent is renamed to Agent and the brief stays
+    Given a wrapper generated for a command that writes its stdin to `seen.json`
+    When the wrapper is run with stdin `{"tool_name": "Subagent", "tool_input": {"prompt": "brief", "subagent_type": "generalPurpose"}}`
+    Then `seen.json` holds `tool_name` equal to `Agent` and `tool_input.prompt` equal to `brief`
+
+  @requirement_cursor_matchers_and_events_are_mapped_or_reported
+  Scenario: An Agent matcher becomes Subagent
+    Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Agent", command: "./guard.sh"}`
+    When converting from claude to cursor into a new directory
+    Then `hooks.preToolUse[0].matcher` equals `Subagent`
+    And the item of kind `hook` named `PreToolUse` has status `exact` and its reason names `node`
 
   @requirement_the_wrapper_renames_shell_to_bash
   Scenario: Other tool names pass unchanged

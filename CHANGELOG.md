@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Mapped a Claude `Agent` guardrail to Cursor `preToolUse` matcher `Subagent`, and renamed that tool to `Agent` so `tool_input.prompt` reaches the hook
 - Wrapped Cursor `Read` guardrails on `beforeReadFile`, with the read range recovered from the content line count
 - Limited Cursor `Read` guardrails to reads that passed `preToolUse` first, so Cursor's own whole-file reads for edits are allowed
 - Wrapped Cursor `Write`, `Edit` and `MultiEdit` guardrails on `preToolUse` instead of writing nothing

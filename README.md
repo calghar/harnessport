@@ -127,7 +127,7 @@ through Node wrappers. Shell guardrails run on `beforeShellExecution`. A `Read` 
 `beforeReadFile` and is `lossy`. A `preToolUse` wrapper first marks each agent read by `tool_use_id`,
 and `beforeReadFile` enforces only marked reads, so Cursor's own whole-file reads for edits pass. A
 read whose `preToolUse` never ran is allowed, and that event order is unverified. The wrapper
-recovers the `Read` range from the content line count. Other tool guardrails run on `preToolUse`. The command runs twice when
+recovers the `Read` range from the content line count. An `Agent` guardrail runs on `preToolUse` with matcher `Subagent`, and the wrapper renames that tool to `Agent` so the brief in `tool_input.prompt` reaches the hook. Other tool guardrails run on `preToolUse`. The command runs twice when
 `.claude/settings.json` also holds it and Cursor's Third-Party Imports is on. In the IDE, turning that
 setting off stops the second run. The Cursor CLI has no opt-out, so there the command always runs
 twice. Cursor has no `Notification` event, so that hook is `dropped`.

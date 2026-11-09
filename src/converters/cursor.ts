@@ -258,6 +258,7 @@ const WRAPPER_TEMPLATE = [
   "  let input;",
   "  try { input = JSON.parse(readFileSync(0, \"utf-8\")); } catch (e) { return end(1, \"harnessport-guard: stdin is not JSON\"); }",
   "  if (input && input.tool_name === \"Shell\") input.tool_name = \"Bash\";",
+  "  if (input && input.tool_name === \"Subagent\") input.tool_name = \"Agent\";",
   "  if (HOOK.record) return record(input);",
   "  if (HOOK.event) return relay(input);",
   "  const shellEvent = !!input && (input.hook_event_name === \"beforeShellExecution\" || (input.tool_name === undefined && typeof input.command === \"string\"));",
@@ -299,6 +300,7 @@ const wrapperSource = (hook: Hook, event?: string, record?: boolean): string =>
 
 const CURSOR_TOOLS: Record<string, string> = {
   Bash: "Shell",
+  Agent: "Subagent",
   Read: "Read",
   Write: "Write",
   Grep: "Grep",
@@ -314,7 +316,7 @@ const REASON_TWICE =
 const REASON_EDIT = "Cursor `Write` covers both creates and edits";
 const REASON_READ =
   "enforced on `beforeReadFile` for reads that passed `preToolUse` first, with the range recovered from the content line count; Cursor's own whole-file reads for edits are allowed; the event order is unverified";
-const REASON_STAR = "Cursor tool names other than `Shell` reach the script unrenamed";
+const REASON_STAR = "Cursor tool names other than `Shell` and `Subagent` reach the script unrenamed";
 const REASON_HOOKS_REFUSED =
   "`.cursor/hooks.json` or the formatter runner already exists with different content; this formatter was not written";
 const REASON_GUARD_REFUSED = "`.cursor/hooks.json` already exists with different content; this guardrail was not written";

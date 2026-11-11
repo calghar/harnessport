@@ -147,7 +147,7 @@ function importFormatters(rootDir: string): { formatters: Formatter[]; items: Fi
 
 function generatedWrapperMetadata(
   filePath: string,
-  constant: "HOOK" | "MCP_ASK",
+  constant: "HOOK" | "MCP_ASK" | "MODEL_LOG",
 ): unknown {
   if (!fs.existsSync(filePath)) return undefined;
   const firstLine = fs.readFileSync(filePath, "utf-8").split(/\r?\n/, 1)[0];
@@ -188,6 +188,16 @@ function importHooks(
           { event: cursorEvent, command: rawEntry.command },
           "Cursor",
           "foreign Cursor hook commands have no Claude hook mapping",
+          "import",
+        ));
+        continue;
+      }
+
+      if (generatedWrapperMetadata(file, "MODEL_LOG") !== undefined) {
+        items.push(hookStatus(
+          { event: cursorEvent, command: rawEntry.command },
+          "Cursor",
+          REASON_MODEL_LOG_IMPORT,
           "import",
         ));
         continue;
@@ -424,6 +434,23 @@ const mcpAskSource = (server: string, tool: string): string => [
   "",
 ].join("\n");
 
+const REASON_MODEL_LOG_IMPORT = "the harnessport model log is Cursor-only and has no Claude hook mapping";
+const MODEL_LOG_REL = ".cursor/hooks/harnessport-model-log.mjs";
+
+const modelLogSource = (): string => [
+  'const MODEL_LOG = {"version":1};',
+  'import { appendFileSync, readFileSync } from "node:fs";',
+  'const KEYS = ["conversation_id", "generation_id", "model", "model_id"];',
+  "try {",
+  '  const input = JSON.parse(readFileSync(0, "utf-8"));',
+  '  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("stdin is not a JSON object");',
+  "  const line = { timestamp: new Date().toISOString() };",
+  "  for (const k of KEYS) if (input[k] !== undefined) line[k] = input[k];",
+  '  appendFileSync(new URL("../harnessport-model.jsonl", import.meta.url), JSON.stringify(line) + "\\n");',
+  '} catch (e) { process.stderr.write("harnessport-model-log: " + String(e.message).split("\\n")[0] + "\\n"); }',
+  "",
+].join("\n");
+
 const CURSOR_TOOLS: Record<string, string> = {
   Bash: "Shell",
   Agent: "Subagent",
@@ -498,6 +525,7 @@ function exportHooks(
   config: HarnessConfig,
   ctx: WriteContext,
   userLevel: boolean,
+  logModel = false,
 ): { files: string[]; items: FidelityItem[] } {
   const items: FidelityItem[] = [];
   const files: string[] = [];
@@ -620,7 +648,7 @@ function exportHooks(
   }
   const formatters = writableFormatters(config);
   items.push(...config.formatters.filter((f) => !formatters.includes(f)).map(formatterItem));
-  if (written === 0 && formatters.length === 0) return { files, items };
+  if (written === 0 && formatters.length === 0 && !logModel) return { files, items };
 
   const stale = (fs.existsSync(hooksDir) ? fs.readdirSync(hooksDir) : []).filter((f) => {
     const m = /^harnessport-guard-(\d+)\.mjs$/.exec(f);
@@ -650,6 +678,16 @@ function exportHooks(
     for (const fmt of formatters) {
       formatEntries.push({ command: `node ${runnerArg} "${fmt.glob}" ${fmt.command}` });
     }
+  }
+
+  if (logModel) {
+    const wrapper = path.join(rootDir, MODEL_LOG_REL);
+    if (writeIfNotDry(wrapper, modelLogSource(), ctx)) files.push(wrapper);
+    eventEntries.stop = [
+      ...(eventEntries.stop ?? []),
+      { command: userLevel ? `node "${wrapper}"` : `node ${MODEL_LOG_REL}` },
+    ];
+    items.push({ phase: "export", kind: "hook", name: "model-log", status: "exact" });
   }
 
   const filePath = path.join(rootDir, ".cursor", "hooks.json");
@@ -1028,7 +1066,7 @@ export const cursorConverter: Converter = {
     const items: FidelityItem[] = [...config.items];
     const homeDir = options.homeDir ?? os.homedir();
     const userLevel = path.resolve(rootDir) === path.resolve(homeDir);
-    const hookExport = exportHooks(rootDir, config, ctx, userLevel);
+    const hookExport = exportHooks(rootDir, config, ctx, userLevel, options.logModel);
     const permissionExport = exportPermissions(rootDir, config.permissions, ctx, userLevel);
     const filesWritten: string[] = [
       ...hookExport.files,

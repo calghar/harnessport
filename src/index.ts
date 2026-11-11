@@ -44,6 +44,7 @@ program
     "--force",
     "Overwrite conflicting existing files, keeping a .bak copy of each",
   )
+  .option("--log-model", "Cursor only: log the active model once per finished task")
   .action(
     (opts: {
       from: string;
@@ -53,6 +54,7 @@ program
       dryRun?: boolean;
       json?: boolean;
       force?: boolean;
+      logModel?: boolean;
     }) => {
       const fromConverter = converters[opts.from];
       const toConverter = converters[opts.to];
@@ -71,6 +73,11 @@ program
       }
       if (opts.from === opts.to) {
         console.error("Source and target must be different.");
+        process.exit(1);
+      }
+
+      if (opts.logModel && opts.to !== "cursor") {
+        console.error("--log-model requires --to cursor.");
         process.exit(1);
       }
 
@@ -104,7 +111,7 @@ program
       progress(
         `\n${dryRun ? "[DRY RUN] " : ""}Exporting to ${opts.to}...`,
       );
-      const result = toConverter.export(targetDir, config, { dryRun, force: opts.force ?? false });
+      const result = toConverter.export(targetDir, config, { dryRun, force: opts.force ?? false, logModel: opts.logModel });
       const blocked = result.items.filter((i) => i.status === "blocked");
 
       if (opts.json) {

@@ -137,6 +137,8 @@ recovers the `Read` range from the content line count. An `Agent` guardrail runs
 setting off stops the second run. The Cursor CLI has no opt-out, so there the command always runs
 twice. Cursor has no `Notification` event, so that hook is `dropped`.
 
+With `--to cursor`, `--log-model` adds a `stop` wrapper that appends the active model to `.cursor/harnessport-model.jsonl` once per finished task. Add that file to `.gitignore`.
+
 ### Check the report rather than trusting it
 
 `verify` converts into a temporary directory, reads the result back, and reports what did not

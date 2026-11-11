@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-11
+
+### Added
+
+- Added `--log-model`, which records the Cursor main-agent model once per finished task in `.cursor/harnessport-model.jsonl`
+
 ## [0.3.0] - 2026-11-09
 
 ### Security
@@ -203,7 +209,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formatters between Claude Code, OpenCode, Cursor, Windsurf, GitHub Copilot, and Codex CLI.
 - `convert`, `detect`, and `list` commands, with `--dry-run` on `convert`.
 
-[Unreleased]: https://github.com/calghar/harnessport/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/calghar/harnessport/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/calghar/harnessport/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/calghar/harnessport/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/calghar/harnessport/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/calghar/harnessport/compare/v0.1.2...v0.2.0

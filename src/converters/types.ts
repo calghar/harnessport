@@ -19,6 +19,8 @@ export interface ExportOptions {
   dryRun?: boolean;
   /** Overwrite a conflicting existing file, after copying it to `<path>.bak`. */
   force?: boolean;
+  /** Cursor only: write a `stop` wrapper that logs the active model once per finished task. */
+  logModel?: boolean;
 }
 
 /**

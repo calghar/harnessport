@@ -519,6 +519,29 @@ const HOOK_EVENTS: Record<string, EventSpec> = {
 };
 
 const FORMAT_RUNNER_REL = `.cursor/hooks/${FORMAT_RUNNER_MARKER}`;
+const HOOK_INTERPRETERS = new Set(["bash", "sh", "python", "python3", "node", "bun"]);
+
+function hookCommandBasename(command: string): string | undefined {
+  const words = command.match(/"[^"]*"|'[^']*'|\S+/g)?.map((word) =>
+    word.replace(/^(['"])(.*)\1$/, "$2")
+  ) ?? [];
+  if (words.length === 0) return undefined;
+
+  const executable = path.basename(words[0]);
+  let script: string | undefined;
+  if (HOOK_INTERPRETERS.has(executable)) {
+    if (words.includes("-c") || words.includes("-e")) return undefined;
+    script = words.slice(1).find((word) => !word.startsWith("-"));
+  } else if (words[0].includes("/") || path.extname(words[0]) !== "") {
+    script = words[0];
+  }
+  if (!script) return undefined;
+
+  const filename = path.basename(script);
+  const stem = filename.slice(0, filename.length - path.extname(filename).length);
+  const name = slugify(stem);
+  return name && name !== "-" ? name : undefined;
+}
 
 function exportHooks(
   rootDir: string,
@@ -535,9 +558,21 @@ function exportHooks(
   const readEntries: Array<Record<string, unknown>> = [];
   const eventEntries: Record<string, Array<Record<string, unknown>>> = {};
   let written = 0;
-  const emit = (hook: Hook, target: Array<Record<string, unknown>>, matcher?: string, event?: string, record?: boolean): void => {
+  const wrapperNames = new Set<string>();
+  const allocateWrapper = (hook?: Hook): string => {
     written += 1;
-    const wrapper = path.join(hooksDir, `harnessport-guard-${written}.mjs`);
+    const source = hook ? hookCommandBasename(hook.command) : undefined;
+    const base = source ? `harnessport-${source}` : `harnessport-guard-${written}`;
+    let name = base;
+    for (let suffix = 2; wrapperNames.has(`${name}.mjs`); suffix += 1) {
+      name = `${base}-${suffix}`;
+    }
+    name = `${name}.mjs`;
+    wrapperNames.add(name);
+    return path.join(hooksDir, name);
+  };
+  const emit = (hook: Hook, target: Array<Record<string, unknown>>, matcher?: string, event?: string, record?: boolean): void => {
+    const wrapper = allocateWrapper(hook);
     if (writeIfNotDry(wrapper, wrapperSource(hook, event, record), ctx)) files.push(wrapper);
     target.push({
       command: userLevel ? `node "${wrapper}"` : `node ${path.relative(rootDir, wrapper)}`,
@@ -553,8 +588,7 @@ function exportHooks(
     if (permission.action !== "ask" || permission.pattern !== "*") continue;
     const mcp = parseClaudeMcpTool(permission.tool);
     if (!mcp) continue;
-    written += 1;
-    const wrapper = path.join(hooksDir, `harnessport-guard-${written}.mjs`);
+    const wrapper = allocateWrapper();
     if (writeIfNotDry(wrapper, mcpAskSource(mcp.server, mcp.tool), ctx)) files.push(wrapper);
     const bucket = eventEntries.beforeMCPExecution ?? [];
     eventEntries.beforeMCPExecution = bucket;
@@ -650,9 +684,13 @@ function exportHooks(
   items.push(...config.formatters.filter((f) => !formatters.includes(f)).map(formatterItem));
   if (written === 0 && formatters.length === 0 && !logModel) return { files, items };
 
-  const stale = (fs.existsSync(hooksDir) ? fs.readdirSync(hooksDir) : []).filter((f) => {
-    const m = /^harnessport-guard-(\d+)\.mjs$/.exec(f);
-    return m !== null && Number(m[1]) > written;
+  const stale = (fs.existsSync(hooksDir) ? fs.readdirSync(hooksDir) : []).filter((file) => {
+    if (wrapperNames.has(file)) return false;
+    const filePath = path.join(hooksDir, file);
+    if (!file.endsWith(".mjs") || !fs.statSync(filePath).isFile()) return false;
+    return /^harnessport-guard-\d+\.mjs$/.test(file)
+      || generatedWrapperMetadata(filePath, "HOOK") !== undefined
+      || generatedWrapperMetadata(filePath, "MCP_ASK") !== undefined;
   });
   if (stale.length > 0 && ctx.force) {
     if (!ctx.dryRun) {

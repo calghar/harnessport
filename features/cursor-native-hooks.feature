@@ -1,13 +1,13 @@
 Feature: cursor-native-hooks
 
   # Requirement: A Read or Write guardrail is wrapped on its Cursor event
-  # A `PreToolUse` hook of dialect `claude` whose matcher has a `Read` token SHALL get a wrapper registered under `beforeReadFile` and a marker-recording wrapper under `preToolUse` with matcher `Read`; `beforeReadFile` enforces only reads whose `tool_use_id` was recorded. Its `Write`, `Edit` and `MultiEdit` tokens SHALL map to a `preToolUse` wrapper with matcher `Write`. A matcher mixing tokens SHALL write one wrapper per Cursor event it needs, numbered over written wrappers in config order, and carry `timeout` and `failClosed` to each. The hook SHALL yield one item of kind `hook`. A hook whose matcher has no `Read` token and a `Bash` token, or has no matcher or `*`, SHALL be exported as before.
+  # A `PreToolUse` hook of dialect `claude` whose matcher has a `Read` token SHALL get a wrapper registered under `beforeReadFile` and a marker-recording wrapper under `preToolUse` with matcher `Read`; `beforeReadFile` enforces only reads whose `tool_use_id` was recorded. Its `Write`, `Edit` and `MultiEdit` tokens SHALL map to a `preToolUse` wrapper with matcher `Write`. A matcher mixing tokens SHALL write one wrapper per Cursor event it needs, named from the source hook with collision suffixes in config order, and carry `timeout` and `failClosed` to each. The hook SHALL yield one item of kind `hook`. A hook whose matcher has no `Read` token and a `Bash` token, or has no matcher or `*`, SHALL be exported as before.
 
   @requirement_a_read_or_write_guardrail_is_wrapped_on_its_cursor_event
   Scenario: A Read and Write guardrail writes one wrapper per event
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Read|Write", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {preToolUse: [{command: "node .cursor/hooks/harnessport-guard-1.mjs", matcher: "Write"}, {command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read"}], beforeReadFile: [{command: "node .cursor/hooks/harnessport-guard-2.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {preToolUse: [{command: "node .cursor/hooks/harnessport-guard.mjs", matcher: "Write"}, {command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read"}], beforeReadFile: [{command: "node .cursor/hooks/harnessport-guard-2.mjs"}]}}`
     And the file `.cursor/hooks/harnessport-guard-2.mjs` exists and contains the string `./guard.sh`
     And the item of kind `hook` named `PreToolUse` has status `lossy` and its reason names `content line count`
 
@@ -15,7 +15,7 @@ Feature: cursor-native-hooks
   Scenario: A Bash guardrail keeps its wrapper
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
-    Then the file `.cursor/hooks/harnessport-guard-1.mjs` exists and contains the string `./guard.sh`
+    Then the file `.cursor/hooks/harnessport-guard.mjs` exists and contains the string `./guard.sh`
     And the item of kind `hook` named `PreToolUse` has status `exact` and its reason names `node`
 
   @requirement_a_read_or_write_guardrail_is_wrapped_on_its_cursor_event
@@ -23,7 +23,7 @@ Feature: cursor-native-hooks
     Given a canonical config holding a hook `{event: "PreToolUse", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
     Then `hooks.preToolUse[0].matcher` equals `*`
-    And the file `.cursor/hooks/harnessport-guard-1.mjs` exists and contains the string `./guard.sh`
+    And the file `.cursor/hooks/harnessport-guard.mjs` exists and contains the string `./guard.sh`
 
   # Requirement: A Read guardrail recovers the read range from the content line count
   # The wrapper of a `beforeReadFile` hook SHALL send the Claude hook `tool_name` `Read` and `tool_input.file_path`. When the payload `content` has fewer lines than the file at `file_path`, it SHALL also send `tool_input.limit` equal to the content line count. With equal counts or an unreadable file it SHALL send no `limit`. The item of the hook SHALL be `lossy`, with a reason stating that the range is recovered from the content line count and unverified in Cursor.
@@ -32,7 +32,7 @@ Feature: cursor-native-hooks
   Scenario: A Bash and Read guardrail writes a shell wrapper and a read wrapper
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash|Read", command: "./guard.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeShellExecution: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}], beforeReadFile: [{command: "node .cursor/hooks/harnessport-guard-2.mjs"}], preToolUse: [{command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeShellExecution: [{command: "node .cursor/hooks/harnessport-guard.mjs"}], beforeReadFile: [{command: "node .cursor/hooks/harnessport-guard-2.mjs"}], preToolUse: [{command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read"}]}}`
     And the item of kind `hook` named `PreToolUse` has status `lossy` and its reason names `content line count`
 
   # Requirement: Other Claude hook events are wrapped on their Cursor events
@@ -42,7 +42,7 @@ Feature: cursor-native-hooks
   Scenario: SessionStart is written under sessionStart
     Given a canonical config holding a hook `{event: "SessionStart", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {sessionStart: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {sessionStart: [{command: "node .cursor/hooks/harnessport-h.mjs"}]}}`
     And the item of kind `hook` named `SessionStart` has status `lossy` and its reason names `additional_context`
     And the item of kind `hook` named `SessionStart` has status `lossy` and its reason names `Third-Party Imports`
 
@@ -50,7 +50,7 @@ Feature: cursor-native-hooks
   Scenario: SessionEnd is written under sessionEnd
     Given a canonical config holding a hook `{event: "SessionEnd", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {sessionEnd: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {sessionEnd: [{command: "node .cursor/hooks/harnessport-h.mjs"}]}}`
     And the item of kind `hook` named `SessionEnd` has status `exact` and its reason names `node`
     And the item of kind `hook` named `SessionEnd` has status `exact` and its reason names `Third-Party Imports`
 
@@ -58,7 +58,7 @@ Feature: cursor-native-hooks
   Scenario: Stop is written under stop
     Given a canonical config holding a hook `{event: "Stop", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {stop: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {stop: [{command: "node .cursor/hooks/harnessport-h.mjs"}]}}`
     And the item of kind `hook` named `Stop` has status `lossy` and its reason names `loop_limit`
     And the item of kind `hook` named `Stop` has status `lossy` and its reason names `Third-Party Imports`
 
@@ -66,7 +66,7 @@ Feature: cursor-native-hooks
   Scenario: SubagentStart is written under subagentStart
     Given a canonical config holding a hook `{event: "SubagentStart", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {subagentStart: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {subagentStart: [{command: "node .cursor/hooks/harnessport-h.mjs"}]}}`
     And the item of kind `hook` named `SubagentStart` has status `exact` and its reason names `node`
     And the item of kind `hook` named `SubagentStart` has status `exact` and its reason names `Third-Party Imports`
 
@@ -74,7 +74,7 @@ Feature: cursor-native-hooks
   Scenario: SubagentStop is written under subagentStop
     Given a canonical config holding a hook `{event: "SubagentStop", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {subagentStop: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {subagentStop: [{command: "node .cursor/hooks/harnessport-h.mjs"}]}}`
     And the item of kind `hook` named `SubagentStop` has status `lossy` and its reason names `loop_limit`
     And the item of kind `hook` named `SubagentStop` has status `lossy` and its reason names `Third-Party Imports`
 
@@ -82,7 +82,7 @@ Feature: cursor-native-hooks
   Scenario: PreCompact is written under preCompact
     Given a canonical config holding a hook `{event: "PreCompact", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {preCompact: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {preCompact: [{command: "node .cursor/hooks/harnessport-h.mjs"}]}}`
     And the item of kind `hook` named `PreCompact` has status `lossy` and its reason names `observer`
     And the item of kind `hook` named `PreCompact` has status `lossy` and its reason names `Third-Party Imports`
 
@@ -90,7 +90,7 @@ Feature: cursor-native-hooks
   Scenario: UserPromptSubmit is written under beforeSubmitPrompt
     Given a canonical config holding a hook `{event: "UserPromptSubmit", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeSubmitPrompt: [{command: "node .cursor/hooks/harnessport-guard-1.mjs"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeSubmitPrompt: [{command: "node .cursor/hooks/harnessport-h.mjs"}]}}`
     And the item of kind `hook` named `UserPromptSubmit` has status `lossy` and its reason names `cannot add context`
     And the item of kind `hook` named `UserPromptSubmit` has status `lossy` and its reason names `Third-Party Imports`
 
@@ -98,7 +98,7 @@ Feature: cursor-native-hooks
   Scenario: PostToolUse is written under postToolUse
     Given a canonical config holding a hook `{event: "PostToolUse", matcher: "Bash", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {postToolUse: [{command: "node .cursor/hooks/harnessport-guard-1.mjs", matcher: "Shell"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {postToolUse: [{command: "node .cursor/hooks/harnessport-h.mjs", matcher: "Shell"}]}}`
     And the item of kind `hook` named `PostToolUse` has status `lossy` and its reason names `cannot block`
     And the item of kind `hook` named `PostToolUse` has status `lossy` and its reason names `Third-Party Imports`
 
@@ -106,7 +106,7 @@ Feature: cursor-native-hooks
   Scenario: PostToolUseFailure is written under postToolUseFailure
     Given a canonical config holding a hook `{event: "PostToolUseFailure", matcher: "Bash", command: "./h.sh"}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {postToolUseFailure: [{command: "node .cursor/hooks/harnessport-guard-1.mjs", matcher: "Shell"}]}}`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {postToolUseFailure: [{command: "node .cursor/hooks/harnessport-h.mjs", matcher: "Shell"}]}}`
     And the item of kind `hook` named `PostToolUseFailure` has status `lossy` and its reason names `cannot block`
     And the item of kind `hook` named `PostToolUseFailure` has status `lossy` and its reason names `Third-Party Imports`
 

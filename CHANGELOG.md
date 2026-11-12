@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-12
+
+### Changed
+
+- Named generated Cursor hook wrappers after their source hook scripts, with deterministic suffixes
+  for collisions
+
 ## [0.4.1] - 2026-11-11
 
 ### Changed
@@ -215,7 +222,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formatters between Claude Code, OpenCode, Cursor, Windsurf, GitHub Copilot, and Codex CLI.
 - `convert`, `detect`, and `list` commands, with `--dry-run` on `convert`.
 
-[Unreleased]: https://github.com/calghar/harnessport/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/calghar/harnessport/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/calghar/harnessport/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/calghar/harnessport/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/calghar/harnessport/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/calghar/harnessport/compare/v0.2.1...v0.3.0

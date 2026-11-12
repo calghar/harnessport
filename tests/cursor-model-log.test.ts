@@ -85,10 +85,10 @@ describe("Cursor model log export", () => {
     const dir = tmpDir();
     cursorConverter.export(dir, config("./stop.sh"), { logModel: true });
     expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks.stop).toEqual([
-      { command: "node .cursor/hooks/harnessport-guard-1.mjs" },
+      { command: "node .cursor/hooks/harnessport-stop.mjs" },
       { command: `node ${WRAPPER}` },
     ]);
-    expect(files(dir)).toContain(".cursor/hooks/harnessport-guard-1.mjs");
+    expect(files(dir)).toContain(".cursor/hooks/harnessport-stop.mjs");
   });
 
   it("rejects --log-model for a non-Cursor target and writes nothing", () => {

@@ -96,4 +96,4 @@ Feature: cursor-model-log
   Scenario: Stop hooks keep order and numbering
     Given a Claude project with one `Stop` hook
     When the Cursor export runs with `--log-model`
-    Then `hooks.stop` holds two entries, `node .cursor/hooks/harnessport-guard-1.mjs` then `node .cursor/hooks/harnessport-model-log.mjs`
+    Then `hooks.stop` holds two entries, `node .cursor/hooks/harnessport-stop.mjs` then `node .cursor/hooks/harnessport-model-log.mjs`

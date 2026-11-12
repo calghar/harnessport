@@ -9,7 +9,8 @@ import { cursorConverter } from "../../src/converters/cursor.js";
 import type { FidelityItem, Hook, HarnessConfig } from "../../src/schema.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const WRAPPER_REL = ".cursor/hooks/harnessport-guard-1.mjs";
+const WRAPPER_REL = ".cursor/hooks/harnessport-stub.mjs";
+const GUARD_REL = ".cursor/hooks/harnessport-guard.mjs";
 const SHELL_PAYLOAD = '{"tool_name": "Shell", "tool_input": {"command": "ls"}}';
 
 interface CursorWorld {
@@ -331,20 +332,20 @@ When(/^converting from claude to cursor with the target equal to that home direc
 });
 
 Then(
-  /^`hooks\.beforeShellExecution\[0\]\.command` in `\.cursor\/hooks\.json` equals `node "<absolute path>\/\.cursor\/hooks\/harnessport-guard-1\.mjs"`, with the path in double quotes$/,
+  /^`hooks\.beforeShellExecution\[0\]\.command` in `\.cursor\/hooks\.json` equals `node "<absolute path>\/\.cursor\/hooks\/harnessport-guard\.mjs"`, with the path in double quotes$/,
   function (this: CursorWorld) {
     const json = JSON.parse(readText(this.outDir, ".cursor/hooks.json"));
-    assert.equal(json.hooks.beforeShellExecution[0].command, `node "${path.join(this.outDir, WRAPPER_REL)}"`);
+    assert.equal(json.hooks.beforeShellExecution[0].command, `node "${path.join(this.outDir, GUARD_REL)}"`);
   },
 );
 
 Then(
-  /^converting into any other directory still writes `node \.cursor\/hooks\/harnessport-guard-1\.mjs`$/,
+  /^converting into any other directory still writes `node \.cursor\/hooks\/harnessport-guard\.mjs`$/,
   function (this: CursorWorld) {
     const other = tmpDir();
     cursorConverter.export(other, this.config, {});
     const json = JSON.parse(readText(other, ".cursor/hooks.json"));
-    assert.equal(json.hooks.beforeShellExecution[0].command, `node ${WRAPPER_REL}`);
+    assert.equal(json.hooks.beforeShellExecution[0].command, `node ${GUARD_REL}`);
   },
 );
 

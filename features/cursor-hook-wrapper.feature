@@ -7,8 +7,8 @@ Feature: cursor-hook-wrapper
   Scenario: A claude Bash guardrail becomes a Cursor beforeShellExecution entry
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh", timeout: 10, failClosed: true}`
     When converting from claude to cursor into a new directory
-    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeShellExecution: [{command: "node .cursor/hooks/harnessport-guard-1.mjs", timeout: 10, failClosed: true}]}}`
-    And the file `.cursor/hooks/harnessport-guard-1.mjs` exists and contains the string `./guard.sh`
+    Then `.cursor/hooks.json` equals `{version: 1, hooks: {beforeShellExecution: [{command: "node .cursor/hooks/harnessport-guard.mjs", timeout: 10, failClosed: true}]}}`
+    And the file `.cursor/hooks/harnessport-guard.mjs` exists and contains the string `./guard.sh`
     And the item of kind `hook` named `PreToolUse` has status `exact` and its reason names `node`
     And no file `.claude/settings.json` is written
 
@@ -16,8 +16,8 @@ Feature: cursor-hook-wrapper
   Scenario: A user-level target writes absolute wrapper paths
     Given a canonical config holding a hook `{event: "PreToolUse", matcher: "Bash", command: "./guard.sh"}` and a home directory passed to the exporter
     When converting from claude to cursor with the target equal to that home directory
-    Then `hooks.beforeShellExecution[0].command` in `.cursor/hooks.json` equals `node "<absolute path>/.cursor/hooks/harnessport-guard-1.mjs"`, with the path in double quotes
-    And converting into any other directory still writes `node .cursor/hooks/harnessport-guard-1.mjs`
+    Then `hooks.beforeShellExecution[0].command` in `.cursor/hooks.json` equals `node "<absolute path>/.cursor/hooks/harnessport-guard.mjs"`, with the path in double quotes
+    And converting into any other directory still writes `node .cursor/hooks/harnessport-guard.mjs`
 
   @requirement_claude_guardrails_export_to_cursor_through_a_generated_node_wrapper
   Scenario: A guardrail without failClosed gets no failClosed key

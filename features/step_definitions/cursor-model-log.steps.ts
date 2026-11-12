@@ -214,9 +214,9 @@ Then("the fidelity report holds one `dropped` item with that reason", function (
 });
 
 Then(
-  /^`hooks\.stop` holds two entries, `node \.cursor\/hooks\/harnessport-guard-1\.mjs` then `node \.cursor\/hooks\/harnessport-model-log\.mjs`$/,
+  /^`hooks\.stop` holds two entries, `node \.cursor\/hooks\/harnessport-stop\.mjs` then `node \.cursor\/hooks\/harnessport-model-log\.mjs`$/,
   function (this: ModelLogWorld) {
     const commands = JSON.parse(read(this.dir, ".cursor/hooks.json")).hooks.stop.map((e: { command: string }) => e.command);
-    assert.deepEqual(commands, ["node .cursor/hooks/harnessport-guard-1.mjs", `node ${WRAPPER}`]);
+    assert.deepEqual(commands, ["node .cursor/hooks/harnessport-stop.mjs", `node ${WRAPPER}`]);
   },
 );

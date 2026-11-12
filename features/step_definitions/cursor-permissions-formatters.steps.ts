@@ -252,7 +252,7 @@ Then(
 );
 
 Then(/^the PreToolUse guardrail's wrapper is still written as before$/, function (this: CpfWorld) {
-  const wrapper = ".cursor/hooks/harnessport-guard-1.mjs";
+  const wrapper = ".cursor/hooks/harnessport-guard.mjs";
   assert.ok(exists(this, wrapper));
   assert.equal(readJson(this, HOOKS_JSON).hooks.beforeShellExecution[0].command, `node ${wrapper}`);
 });

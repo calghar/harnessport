@@ -85,4 +85,4 @@ WHEN the export runs with `--log-model` and the source holds Claude `Stop` hooks
 #### Scenario: Stop hooks keep order and numbering
 - **GIVEN** a Claude project with one `Stop` hook
 - **WHEN** the Cursor export runs with `--log-model`
-- **THEN** `hooks.stop` holds two entries, `node .cursor/hooks/harnessport-guard-1.mjs` then `node .cursor/hooks/harnessport-model-log.mjs`
+- **THEN** `hooks.stop` holds two entries, `node .cursor/hooks/harnessport-stop.mjs` then `node .cursor/hooks/harnessport-model-log.mjs`

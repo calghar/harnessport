@@ -12,7 +12,8 @@ import type { Hook, HarnessConfig } from "../src/schema.js";
 // Each case spawns Node wrapper processes; 5 s was too tight under load.
 vi.setConfig({ testTimeout: 30_000 });
 
-const WRAPPER = ".cursor/hooks/harnessport-guard-1.mjs";
+const WRAPPER = ".cursor/hooks/harnessport-stub.mjs";
+const GUARD_WRAPPER = ".cursor/hooks/harnessport-guard.mjs";
 const SHELL = JSON.stringify({ tool_name: "Shell", tool_input: { command: "ls" } });
 
 const tmpDir = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "harnessport-cursor-"));
@@ -94,7 +95,7 @@ describe("Cursor beforeShellExecution", () => {
       version: 1,
       hooks: {
         preToolUse: [{ command: `node ${WRAPPER}`, matcher: "Shell|Grep" }],
-        beforeShellExecution: [{ command: "node .cursor/hooks/harnessport-guard-2.mjs" }],
+        beforeShellExecution: [{ command: "node .cursor/hooks/harnessport-stub-2.mjs" }],
       },
     });
   });
@@ -158,7 +159,7 @@ describe("Cursor Read marker pairing", () => {
     fs.writeFileSync(path.join(dir, "big.txt"), lines(600));
     cursorConverter.export(dir, configWith(guard({ matcher: "Read" })), {});
     const run = (n: number, input: string) =>
-      spawnSync("node", [`.cursor/hooks/harnessport-guard-${n}.mjs`], { cwd: dir, input, encoding: "utf-8", env: { ...process.env, TMPDIR: tmp } });
+      spawnSync("node", [n === 1 ? WRAPPER : `.cursor/hooks/harnessport-stub-${n}.mjs`], { cwd: dir, input, encoding: "utf-8", env: { ...process.env, TMPDIR: tmp } });
     const marker = (id: string) => path.join(tmp, "harnessport-read", id);
     return { dir, run, marker, file: path.join(dir, "big.txt"), ran: () => fs.existsSync(path.join(dir, "seen.json")) };
   };
@@ -258,15 +259,15 @@ describe("Cursor hook export", () => {
     const first = cursorConverter.export(dir, config, {});
     expect(JSON.parse(read(dir, ".cursor/hooks.json"))).toEqual({
       version: 1,
-      hooks: { beforeShellExecution: [{ command: `node ${WRAPPER}`, timeout: 10, failClosed: true }] },
+      hooks: { beforeShellExecution: [{ command: `node ${GUARD_WRAPPER}`, timeout: 10, failClosed: true }] },
     });
-    expect(read(dir, WRAPPER)).toContain("./guard.sh");
+    expect(read(dir, GUARD_WRAPPER)).toContain("./guard.sh");
     expect(first.items.find((i) => i.kind === "hook")?.reason).toMatch(/node.*runs twice/);
     expect(fs.existsSync(path.join(dir, ".claude"))).toBe(false);
 
-    const before = [read(dir, ".cursor/hooks.json"), read(dir, WRAPPER)];
+    const before = [read(dir, ".cursor/hooks.json"), read(dir, GUARD_WRAPPER)];
     const again = cursorConverter.export(dir, config, {});
-    expect([read(dir, ".cursor/hooks.json"), read(dir, WRAPPER)]).toEqual(before);
+    expect([read(dir, ".cursor/hooks.json"), read(dir, GUARD_WRAPPER)]).toEqual(before);
     expect(again.items.some((i) => i.status === "blocked")).toBe(false);
   });
 
@@ -280,11 +281,11 @@ describe("Cursor hook export", () => {
     const out = tmpDir();
     cursorConverter.export(out, config, {});
     expect(JSON.parse(read(out, ".cursor/hooks.json")).hooks.beforeShellExecution[0])
-      .toEqual({ command: `node ${WRAPPER}`, timeout: 10, failClosed: true });
-    expect(read(out, WRAPPER)).toContain("./guard.sh");
-    const before = [read(out, ".cursor/hooks.json"), read(out, WRAPPER)];
+      .toEqual({ command: `node ${GUARD_WRAPPER}`, timeout: 10, failClosed: true });
+    expect(read(out, GUARD_WRAPPER)).toContain("./guard.sh");
+    const before = [read(out, ".cursor/hooks.json"), read(out, GUARD_WRAPPER)];
     cursorConverter.export(out, config, {});
-    expect([read(out, ".cursor/hooks.json"), read(out, WRAPPER)]).toEqual(before);
+    expect([read(out, ".cursor/hooks.json"), read(out, GUARD_WRAPPER)]).toEqual(before);
   });
 
   it("maps supported matchers and blocks unsupported ones without writing", () => {
@@ -314,9 +315,9 @@ describe("Cursor hook export", () => {
     expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks).toEqual({
       preToolUse: [
         { command: `node ${WRAPPER}`, matcher: "Write" },
-        { command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read" },
+        { command: "node .cursor/hooks/harnessport-stub-3.mjs", matcher: "Read" },
       ],
-      beforeReadFile: [{ command: "node .cursor/hooks/harnessport-guard-2.mjs" }],
+      beforeReadFile: [{ command: "node .cursor/hooks/harnessport-stub-2.mjs" }],
     });
     const hooks = items.filter((i) => i.kind === "hook");
     expect(hooks[0]?.status).toBe("exact");
@@ -324,25 +325,24 @@ describe("Cursor hook export", () => {
     expect(hooks[1]?.reason).toContain("content line count");
   });
 
-  it("numbers wrappers over written hooks only", () => {
+  it("uses readable names for written hooks", () => {
     const dir = tmpDir();
     cursorConverter.export(dir, configWith(guard({ matcher: "Write" }), guard()), {});
     expect(fs.existsSync(path.join(dir, WRAPPER))).toBe(true);
     expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks.beforeShellExecution).toHaveLength(1);
   });
 
-  it("keeps Bash and no-matcher output byte-identical to before", () => {
+  it("keeps Bash and no-matcher wrapper behavior byte-identical", () => {
     const sha = (dir: string, rel: string) => createHash("sha256").update(fs.readFileSync(path.join(dir, rel))).digest("hex");
     const dir = tmpDir();
     const { items } = cursorConverter.export(dir, configWith(guard({ command: "./guard.sh" })), {});
-    expect(sha(dir, WRAPPER)).toBe("98ca6189dd465bb2a13b6b53ce6e955f410815d7b9c5deb47e2de1b4cff2d748");
-    expect(sha(dir, ".cursor/hooks.json")).toBe("e7a3f206398f492486d2ea88123a226600aac2fe3ad231c6a3fa23f78219af67");
+    expect(sha(dir, GUARD_WRAPPER)).toBe("98ca6189dd465bb2a13b6b53ce6e955f410815d7b9c5deb47e2de1b4cff2d748");
     expect(items.find((i) => i.kind === "hook")?.status).toBe("exact");
 
     const bare = tmpDir();
     const bareItems = cursorConverter.export(bare, configWith(guard({ matcher: undefined, command: "./guard.sh" })), {}).items;
-    const [bareMetadata, ...bareWrapper] = read(bare, WRAPPER).split("\n");
-    const [bashMetadata, ...bashWrapper] = read(dir, WRAPPER).split("\n");
+    const [bareMetadata, ...bareWrapper] = read(bare, GUARD_WRAPPER).split("\n");
+    const [bashMetadata, ...bashWrapper] = read(dir, GUARD_WRAPPER).split("\n");
     expect(bareMetadata).toBe('const HOOK = {"command":"./guard.sh","sourceEvent":"PreToolUse"};');
     expect(bashMetadata).toContain('"matcher":"Bash"');
     expect(bareWrapper).toEqual(bashWrapper);
@@ -355,8 +355,8 @@ describe("Cursor hook export", () => {
     const { items } = cursorConverter.export(dir, configWith(guard({ matcher: "Bash|Read", timeout: 5, failClosed: true })), {});
     expect(JSON.parse(read(dir, ".cursor/hooks.json")).hooks).toEqual({
       beforeShellExecution: [{ command: `node ${WRAPPER}`, timeout: 5, failClosed: true }],
-      beforeReadFile: [{ command: "node .cursor/hooks/harnessport-guard-2.mjs", timeout: 5, failClosed: true }],
-      preToolUse: [{ command: "node .cursor/hooks/harnessport-guard-3.mjs", matcher: "Read" }],
+      beforeReadFile: [{ command: "node .cursor/hooks/harnessport-stub-2.mjs", timeout: 5, failClosed: true }],
+      preToolUse: [{ command: "node .cursor/hooks/harnessport-stub-3.mjs", matcher: "Read" }],
     });
     const hooks = items.filter((i) => i.kind === "hook");
     expect(hooks).toHaveLength(1);
@@ -397,7 +397,7 @@ describe("Cursor hook export", () => {
       const dir = tmpDir();
       const { items } = cursorConverter.export(dir, configWith(hookFor(event, matcher ? { matcher: "Bash" } : {})), {});
       const entry = JSON.parse(read(dir, ".cursor/hooks.json")).hooks[cursor];
-      expect(entry).toEqual([{ command: "node .cursor/hooks/harnessport-guard-1.mjs", ...(matcher && { matcher }) }]);
+      expect(entry).toEqual([{ command: `node ${WRAPPER}`, ...(matcher && { matcher }) }]);
       const item = items.find((i) => i.name === event);
       expect(item?.status).toBe(event === "SessionEnd" ? "exact" : "lossy");
       expect(item?.reason).toContain("Third-Party Imports");

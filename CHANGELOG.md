@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Copilot round trips collapsing purpose-named hook files into `hooks.json`; source basenames
+  and grouping are now preserved
+
 ## [0.4.2] - 2026-11-12
 
 ### Changed

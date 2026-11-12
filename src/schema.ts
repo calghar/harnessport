@@ -67,6 +67,7 @@ export interface Hook {
   event: string; // e.g. "PostToolUse"
   matcher?: string; // e.g. "Edit|Write|MultiEdit"
   command: string;
+  sourceFile?: string; // Copilot source JSON basename
   failClosed?: boolean; // a failing hook blocks the action
   timeout?: number; // seconds
   args?: string[];

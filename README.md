@@ -173,6 +173,7 @@ Harnessport imports the source tool's config files into a canonical intermediate
 
 - Every write goes through `writeIfNotDry` in `utils.ts`, so the never-overwrite rule has one enforcement point.
 - Every permission decision goes through `permissionStatus` in the same file, so the never-weaken rule has one too.
+- Copilot round trips preserve imported hook JSON basenames and grouping. Hooks from other sources use `.github/hooks/hooks.json`.
 
 ## Development
 

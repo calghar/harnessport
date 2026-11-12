@@ -179,7 +179,9 @@ function importHooks(rootDir: string): Hook[] {
       const event = camel ? COPILOT_TO_CLAUDE[key] : key;
       return handlers.flatMap((h) => {
         const parsed = extractHandler(h);
-        return parsed ? [{ event, ...parsed, ...(camel && { dialect: "copilot" as const }) }] : [];
+        return parsed
+          ? [{ event, ...parsed, sourceFile: file, ...(camel && { dialect: "copilot" as const }) }]
+          : [];
       });
     });
   });
@@ -282,8 +284,10 @@ const REASON_PERMISSIONS =
 const PRE_TOOL_USE_LOSSY =
   "Copilot reads top-level `permissionDecision`, not nested `hookSpecificOutput`, so a Claude JSON deny is not enforced, and exit 0 with no output counts as allow";
 
-/** The `{item, key, entry}` for one hook; `entry` is absent when the hook is not written. */
-function planHook(hook: Hook): { item: FidelityItem; key?: string; entry?: Record<string, unknown> } {
+/** The export plan for one hook; `entry` is absent when the hook is not written. */
+function planHook(
+  hook: Hook,
+): { item: FidelityItem; key?: string; entry?: Record<string, unknown>; fileName?: string } {
   const claude = (hook.dialect ?? "claude") === "claude";
   const refuse = (limitation: string) => ({ item: hookStatus(hook, "Copilot", limitation) });
   const guardrail = GUARDRAIL_EVENTS.has(hook.event);
@@ -316,7 +320,13 @@ function planHook(hook: Hook): { item: FidelityItem; key?: string; entry?: Recor
   const item: FidelityItem = lossy
     ? { phase: "export", kind: "hook", name: hook.event, status: "lossy", reason: lossy }
     : { phase: "export", kind: "hook", name: hook.event, status: "exact" };
-  return { item, key, entry };
+  const sourceFile = hook.sourceFile;
+  const fileName = sourceFile?.endsWith(".json") &&
+      path.basename(sourceFile) === sourceFile &&
+      path.win32.basename(sourceFile) === sourceFile
+    ? sourceFile
+    : "hooks.json";
+  return { item, key, entry, fileName };
 }
 
 function exportHooks(
@@ -326,17 +336,23 @@ function exportHooks(
 ): { files: string[]; items: FidelityItem[] } {
   const plans = hooks.map(planHook);
   const items = plans.map((p) => p.item);
-  const table: Record<string, Array<Record<string, unknown>>> = {};
-  for (const { key, entry } of plans) {
-    if (!key || !entry) continue;
+  const tables = new Map<string, Record<string, Array<Record<string, unknown>>>>();
+  for (const { key, entry, fileName } of plans) {
+    if (!key || !entry || !fileName) continue;
+    const table = tables.get(fileName) ?? {};
     table[key] ??= [];
     table[key].push(entry);
+    tables.set(fileName, table);
   }
-  if (Object.keys(table).length === 0) return { files: [], items };
+  if (tables.size === 0) return { files: [], items };
 
-  const filePath = path.join(rootDir, ".github", "hooks", "hooks.json");
-  const body = `${JSON.stringify({ version: 1, hooks: table }, null, 2)}\n`;
-  return { files: writeIfNotDry(filePath, body, ctx) ? [filePath] : [], items };
+  const files: string[] = [];
+  for (const [fileName, table] of tables) {
+    const filePath = path.join(rootDir, ".github", "hooks", fileName);
+    const body = `${JSON.stringify({ version: 1, hooks: table }, null, 2)}\n`;
+    if (writeIfNotDry(filePath, body, ctx)) files.push(filePath);
+  }
+  return { files, items };
 }
 
 function agentItems(agents: Agent[]): FidelityItem[] {

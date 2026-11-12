@@ -7,7 +7,7 @@
 // `harnessport verify`, `harnessport check`, and tests/matrix.test.ts all compare through here,
 // so a command and its test cannot disagree about what counts as loss.
 
-import type { Feature, FidelityItem, HarnessConfig } from "./schema.js";
+import type { Feature, FidelityItem, HarnessConfig, Hook } from "./schema.js";
 
 /** One named thing that did not survive, or that one harness has and another does not. */
 export interface Lost {
@@ -97,6 +97,12 @@ function sameValue(left: unknown, right: unknown): boolean {
   return sourceFieldsSurvive(left, right);
 }
 
+function withoutHookProvenance(
+  { sourceFile: _sourceFile, ...hook }: Hook,
+): Omit<Hook, "sourceFile"> {
+  return hook;
+}
+
 function changedFields(source: HarnessConfig, target: HarnessConfig): Lost[] {
   const compare = <T>(
     kind: Feature,
@@ -124,7 +130,12 @@ function changedFields(source: HarnessConfig, target: HarnessConfig): Lost[] {
       target.permissions,
       (permission) => `${permission.tool}(${permission.pattern})`,
     ),
-    ...compare("hook", source.hooks, target.hooks, (hook) => hook.event),
+    ...compare(
+      "hook",
+      source.hooks.map(withoutHookProvenance),
+      target.hooks.map(withoutHookProvenance),
+      (hook) => hook.event,
+    ),
     ...compare("formatter", source.formatters, target.formatters, (formatter) => formatter.glob),
   ];
 }

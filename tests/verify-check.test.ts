@@ -84,5 +84,18 @@ describe("Requirement: verify separates accounted-for loss from unaccounted loss
     expect(loss.unaccounted).toEqual([{ kind: "agent", name: "ghost" }]);
     expect(loss.accounted).toEqual([]);
   });
+
+  it("Copilot source filenames are not runtime hook loss", () => {
+    const source: HarnessConfig = {
+      rules: [], agents: [], skills: [], commands: [], mcpServers: [], permissions: [],
+      hooks: [{ event: "PostToolUse", command: "./audit.sh", sourceFile: "audit.json" }],
+      formatters: [], items: [],
+    };
+    const target: HarnessConfig = {
+      ...source,
+      hooks: [{ event: "PostToolUse", command: "./audit.sh" }],
+    };
+    expect(roundTripLoss(source, target, []).unaccounted).toEqual([]);
+  });
 });
 

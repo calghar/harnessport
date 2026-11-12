@@ -76,6 +76,63 @@ describe("Copilot and Codex hook export", () => {
     expect(items.find((i) => i.kind === "hook")?.status).toBe("lossy");
   });
 
+  it("preserves Copilot source filenames, grouping, and bare files", () => {
+    const src = tmpDir();
+    write(src, ".github/hooks/policy.json", JSON.stringify({ version: 1, hooks: {
+      preToolUse: [{ type: "command", bash: "./policy.sh" }],
+    } }));
+    write(src, ".github/hooks/audit.json", JSON.stringify({ version: 1, hooks: {
+      postToolUse: [{ type: "command", bash: "./audit.sh" }],
+    } }));
+    write(src, ".github/hooks/lifecycle.json", JSON.stringify({ version: 1, hooks: {
+      sessionStart: [{ type: "command", bash: "./start.sh" }],
+      sessionEnd: [{ type: "command", bash: "./end.sh" }],
+    } }));
+    write(src, ".github/hooks/guard.json", JSON.stringify({
+      PreToolUse: [{ type: "command", bash: "./guard.sh" }],
+    }));
+
+    const config = copilotConverter.import(src);
+    expect(config.hooks.map((hook) => hook.sourceFile).sort()).toEqual([
+      "audit.json", "guard.json", "lifecycle.json", "lifecycle.json", "policy.json",
+    ]);
+
+    const out = tmpDir();
+    copilotConverter.export(out, config);
+    expect(JSON.parse(fs.readFileSync(path.join(out, ".github/hooks/lifecycle.json"), "utf-8")).hooks)
+      .toMatchObject({ sessionStart: expect.any(Array), sessionEnd: expect.any(Array) });
+    expect(JSON.parse(fs.readFileSync(path.join(out, ".github/hooks/guard.json"), "utf-8")).version).toBe(1);
+    expect(fs.existsSync(path.join(out, ".github/hooks/hooks.json"))).toBe(false);
+  });
+
+  it("keeps named and unnamed Copilot hooks in separate files", () => {
+    const out = tmpDir();
+    copilotConverter.export(out, withHooks([
+      { event: "postToolUse", command: "./policy.sh", dialect: "copilot", sourceFile: "policy.json" },
+      { event: "PostToolUse", command: "./default.sh" },
+      { event: "Stop", command: "./invalid.sh", sourceFile: "../escape.json" },
+    ]));
+    expect(fs.readFileSync(path.join(out, ".github/hooks/policy.json"), "utf-8")).toContain("./policy.sh");
+    const fallback = fs.readFileSync(path.join(out, ".github/hooks/hooks.json"), "utf-8");
+    expect(fallback).toContain("./default.sh");
+    expect(fallback).toContain("./invalid.sh");
+    expect(fs.existsSync(path.join(out, ".github/escape.json"))).toBe(false);
+  });
+
+  it("does not overwrite a conflicting retained Copilot hook file", () => {
+    const out = tmpDir();
+    const file = ".github/hooks/guard.json";
+    write(out, file, '{"foreign":true}\n');
+    const result = copilotConverter.export(out, withHooks([
+      { event: "PreToolUse", command: "./guard.sh", sourceFile: "guard.json" },
+    ]));
+    expect(fs.readFileSync(path.join(out, file), "utf-8")).toBe('{"foreign":true}\n');
+    expect(result.items).toContainEqual(expect.objectContaining({
+      name: path.join(out, file),
+      status: "blocked",
+    }));
+  });
+
   it("writes only Bash-matcher Codex hooks and blocks an Edit|Write guardrail", () => {
     const out = tmpDir();
     const { items } = codexConverter.export(out, withHooks([
